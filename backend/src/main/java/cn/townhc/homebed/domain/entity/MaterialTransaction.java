@@ -1,6 +1,7 @@
 package cn.townhc.homebed.domain.entity;
 
 import cn.townhc.homebed.domain.enums.DomainEnums.MaterialTxType;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -42,6 +43,12 @@ public class MaterialTransaction extends BaseEntity {
 
     @Column(length = 512)
     private String note;
+
+    /** 替代材料确认单（该次出库为缺货替代执行时填充，账单备注据此提示） */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "substitute_id")
+    @JsonIgnore
+    private MaterialSubstitute substitute;
 
     private LocalDateTime occurredAt;
 }

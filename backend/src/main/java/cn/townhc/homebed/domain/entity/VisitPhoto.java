@@ -17,10 +17,15 @@ public class VisitPhoto extends BaseEntity {
     @Column(nullable = false, length = 256)
     private String filePath;
 
-    /** 照片类型：scene/scene_home/ulcer/dressing/signature/catheter/other */
+    /** 照片类型：scene/scene_home/ulcer/dressing/signature/catheter/substitute_tracking/other */
     @Column(length = 32)
     private String photoType;
 
     @Column(length = 256)
     private String caption;
+
+    /** 替代材料效果追踪照片：关联替代确认单（巡诊正常照片该字段为空） */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "substitute_id")
+    private MaterialSubstitute substitute;
 }

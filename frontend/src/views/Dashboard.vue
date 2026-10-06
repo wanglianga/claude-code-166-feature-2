@@ -47,6 +47,15 @@
               </template>
             </el-table-column>
           </el-table>
+          <div class="sub-kpi mt-12">
+            <span class="muted">缺货替代：</span>
+            <el-tag size="small" type="warning">待医生确认 {{ data.substitutePendingDoctor || 0 }}</el-tag>
+            <el-tag size="small" type="danger">待家属签字 {{ data.substitutePendingFamily || 0 }}</el-tag>
+            <el-tag size="small" type="success">执行追踪中 {{ data.substituteTracking || 0 }}</el-tag>
+            <el-tag size="small" type="info">家属拒绝 {{ data.substituteRejected || 0 }}</el-tag>
+            <el-tag size="small">医生已回看 {{ data.substituteReviewed || 0 }}</el-tag>
+            <el-tag size="small" type="warning" class="ml6">待补货 {{ data.replenishPending || 0 }}</el-tag>
+          </div>
         </div>
       </el-col>
     </el-row>
@@ -153,4 +162,5 @@ onBeforeUnmount(() => charts.forEach(c => c.dispose()))
 .chart-title { font-weight: 600; font-size: 14px; margin-bottom: 8px; color: #303a45; }
 .chart { height: 230px; }
 .ml6 { margin-left: 6px; }
+.sub-kpi { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; border-top: 1px dashed #e4e7ed; padding-top: 8px; }
 </style>

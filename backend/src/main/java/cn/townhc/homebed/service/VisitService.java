@@ -24,6 +24,7 @@ public class VisitService {
     private final RiskEventRepository riskEventRepository;
     private final MaterialRepository materialRepository;
     private final MaterialTransactionRepository materialTransactionRepository;
+    private final MaterialSubstituteRepository substituteRepository;
     private final ChargeCatalogRepository catalogRepository;
     private final SysUserRepository userRepository;
     private final AuditService auditService;
@@ -71,6 +72,13 @@ public class VisitService {
         map.put("photos", photoRepository.findByVisitId(id));
         map.put("exceptions", exceptionRepository.findByVisitId(id));
         map.put("materialTransactions", materialTransactionRepository.findByVisitId(id));
+        List<MaterialSubstitute> visitSubstitutes = substituteRepository.findByVisitId(id);
+        visitSubstitutes.forEach(s -> {
+            org.hibernate.Hibernate.initialize(s.getOriginalMaterial());
+            org.hibernate.Hibernate.initialize(s.getSubstituteMaterial());
+            if (s.getDoctor() != null) org.hibernate.Hibernate.initialize(s.getDoctor());
+        });
+        map.put("substitutes", visitSubstitutes);
         return map;
     }
 

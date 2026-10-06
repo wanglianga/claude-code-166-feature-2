@@ -73,6 +73,46 @@
               </el-collapse-item>
             </el-collapse>
           </div>
+          <div class="card-soft mb12">
+            <div class="section-title">缺货替代确认（{{ (data.substitutes||[]).length }}）</div>
+            <el-collapse v-if="(data.substitutes||[]).length">
+              <el-collapse-item v-for="sm in data.substitutes" :key="sm.substitute.id"
+                                :title="`${sm.substitute.substituteNo} ${sm.substitute.originalMaterial.name}→${sm.substitute.substituteMaterial.name}`">
+                <div>
+                  <el-tag size="small" :type="tagType('SubstituteStatus',sm.substitute.status)">
+                    {{ label('SubstituteStatus',sm.substitute.status) }}
+                  </el-tag>
+                  <span class="muted ml8">{{ sm.substitute.createdAt?.replace('T',' ').slice(0,16) }}</span>
+                </div>
+                <div class="tl-detail">原医嘱/方案：{{ sm.substitute.originalUsageSnapshot }}</div>
+                <div>医保差额：总额 {{ sm.substitute.totalDiff }} ｜ 报销 {{ sm.substitute.insuranceDiff }} ｜ 自费 {{ sm.substitute.selfPayDiff }}</div>
+                <div class="muted">可能影响：{{ sm.substitute.possibleImpact }}</div>
+                <div v-if="sm.substitute.doctorConfirmedAt">医生 {{ sm.substitute.doctor?.name }}：{{ sm.substitute.doctorApproved ? '同意' : '不同意' }}（{{ sm.substitute.doctorConfirmedAt?.replace('T',' ').slice(0,16) }}）{{ sm.substitute.doctorComment }}</div>
+                <div v-if="sm.substitute.familySignedAt" class="sign-line">
+                  <el-image :src="sm.substitute.familySignPath" class="sign-thumb" fit="contain" />
+                  家属 {{ sm.substitute.familySignName }} {{ sm.substitute.status === 'FAMILY_REJECTED' ? '不同意' : '同意' }}：{{ sm.substitute.familyDecisionNote }}
+                </div>
+                <div v-for="t in sm.trackings" :key="t.id" class="mt-12">
+                  <el-tag size="small" :type="tagType('SubstituteFollowUp', t.outcome)">{{ label('SubstituteFollowUp',t.outcome) }}</el-tag>
+                  <span class="muted ml8">{{ t.recordedAt?.replace('T',' ').slice(0,16) }} {{ t.recorder?.name }}</span>
+                  <div class="tl-detail">{{ t.note }}</div>
+                </div>
+                <div v-if="sm.substitute.reviewedAt" class="mt-12">
+                  <el-tag size="small" type="danger">医生已回看调整</el-tag>
+                  <div class="tl-detail">{{ sm.substitute.reviewAction }}</div>
+                  <div v-if="sm.substitute.reviewOrder" class="muted">调整医嘱 {{ sm.substitute.reviewOrder.orderNo }}：{{ sm.substitute.reviewOrder.content }}</div>
+                </div>
+                <div v-if="sm.substitute.replenishTask" class="mt-12">
+                  <el-tag size="small" type="warning">补货 {{ sm.substitute.replenishTask.taskNo }}（{{ label('ReplenishStatus', sm.substitute.replenishTask.status) }}）</el-tag>
+                </div>
+                <div v-if="sm.substitute.careAdjustment" class="mt-12">
+                  <el-tag size="small" type="info">护理调整 {{ sm.substitute.careAdjustment.adjustNo }}（{{ label('CareAdjustStatus', sm.substitute.careAdjustment.status) }}）</el-tag>
+                  <div class="tl-detail">{{ sm.substitute.careAdjustment.adjustmentContent }}</div>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+            <div v-else class="muted">无耗材替代记录</div>
+          </div>
           <div class="card-soft">
             <div class="section-title">账单与合规</div>
             <el-timeline>
@@ -110,7 +150,8 @@ function stageType(stage) {
     '申请': 'primary', '评估': 'warning', '排班': 'primary', '上门': 'primary',
     '巡诊记录': '', '家属签字': 'success', '医嘱': 'warning', '远程复核': 'warning',
     '异常': 'danger', '账单': 'info', '家属确认': 'success', '收费质疑': 'danger',
-    '结算': 'success', '风险': 'danger'
+    '结算': 'success', '风险': 'danger', '耗材替代': 'warning', '替代追踪': '',
+    '补货任务': 'warning', '护理计划调整': 'info'
   }[stage] || ''
 }
 

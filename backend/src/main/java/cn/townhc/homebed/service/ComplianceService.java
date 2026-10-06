@@ -27,6 +27,7 @@ import java.util.*;
  *  R5 冷链断链风险：冷链药品未登记交接温度
  *  R6 医保目录变化：出账后目录版本（比例/价格/可报状态）调整，按出账快照还原
  *  R7 缺少现场照片证据：收费护理项目对应巡诊无任何照片
+ *  R8 缺货替代材料：替代出库行须具备医生确认+家属签字，并提示医保报销类别/比例差异（可解释提示而非机械拒付）
  */
 @Slf4j
 @Service
@@ -39,6 +40,7 @@ public class ComplianceService {
     private final ChargeCatalogRepository catalogRepository;
     private final VisitRepository visitRepository;
     private final VisitPhotoRepository photoRepository;
+    private final MaterialTransactionRepository materialTxRepository;
     private final SysUserRepository userRepository;
     private final AuditService auditService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -80,6 +82,7 @@ public class ComplianceService {
             if (v.getVisitNo() != null) visitByNo.put(v.getVisitNo(), v);
         }
         Set<Long> photoVisitIds = new HashSet<>();
+        Set<Long> substituteCheckedVisits = new HashSet<>();
         for (BillItem it : items) {
             Visit visit = null;
             if (it.getSourceNo() != null
@@ -112,6 +115,36 @@ public class ComplianceService {
                             "护理项目[" + it.getItemName() + "]对应巡诊 " + visit.getVisitNo()
                                     + " 未上传现场照片，证据链不完整",
                             List.of(visit.getVisitNo())));
+                }
+                // R8 缺货替代材料：医生确认+家属签字校验与医保差异提示（每巡诊仅提示一次）
+                if (substituteCheckedVisits.add(visit.getId())) {
+                    for (MaterialTransaction mtx : materialTxRepository.findByVisitId(visit.getId())) {
+                        MaterialSubstitute sub = mtx.getSubstitute();
+                        if (sub == null) continue;
+                        if (sub.getDoctorApproved() == null || !sub.getDoctorApproved()
+                                || sub.getFamilySignPath() == null || sub.getFamilySignPath().isBlank()) {
+                            issues.add(new Issue("R8", "VIOLATION",
+                                    "替代材料[" + mtx.getMaterial().getName() + "]缺少医生确认或家属签字，不符合替代确认流程",
+                                    List.of(visit.getVisitNo())));
+                        } else {
+                            boolean selfPayGap = sub.getSubReimbursable() == null
+                                    || !sub.getSubReimbursable()
+                                    || (sub.getInsuranceDiff() != null && sub.getInsuranceDiff().signum() < 0);
+                            issues.add(new Issue("R8", selfPayGap ? "WARNING" : "INFO",
+                                    "缺货替代：原品[" + sub.getOriginalMaterial().getName()
+                                            + "](" + nz(sub.getOrigInsuranceCategory())
+                                            + (sub.getOrigReimbursementRate() == null ? "" : "·报" + sub.getOrigReimbursementRate())
+                                            + ")→替代[" + sub.getSubstituteMaterial().getName()
+                                            + "](" + nz(sub.getSubInsuranceCategory())
+                                            + (sub.getSubReimbursementRate() == null ? "" : "·报" + sub.getSubReimbursementRate())
+                                            + ")；总费用差 " + sub.getTotalDiff()
+                                            + "、医保报销差 " + sub.getInsuranceDiff()
+                                            + "、家属自费差 " + sub.getSelfPayDiff()
+                                            + "；已由医生 " + safeName(sub.getDoctor()) + " 确认、家属 "
+                                            + sub.getFamilySignName() + " 签字同意，请按替代确认单快照核定",
+                                    List.of(visit.getVisitNo())));
+                        }
+                    }
                 }
             }
         }
@@ -167,6 +200,9 @@ public class ComplianceService {
                 .filter(c -> c.getCode().equals(code))
                 .findFirst().orElse(null);
     }
+
+    private String nz(String s) { return s == null || s.isBlank() ? "丙类" : s; }
+    private String safeName(SysUser u) { return u == null ? "-" : u.getName(); }
 
     @Transactional(readOnly = true)
     public List<Issue> issues(ComplianceRecord r) {

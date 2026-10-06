@@ -28,6 +28,8 @@ public class DashboardService {
     private final BillRepository billRepository;
     private final SysUserRepository userRepository;
     private final PatientRepository patientRepository;
+    private final MaterialSubstituteRepository substituteRepository;
+    private final MaterialReplenishTaskRepository replenishRepository;
 
     @Transactional(readOnly = true)
     public Map<String, Object> overview() {
@@ -144,6 +146,30 @@ public class DashboardService {
             }
         }
         data.put("materialShortage", shortage);
+
+        // 耗材缺货替代与补货
+        long substituteTracking = substituteRepository.countByStatus(SubstituteStatus.EXECUTED);
+        data.put("substitutePendingDoctor", substituteRepository.countByStatus(SubstituteStatus.PROPOSED));
+        data.put("substitutePendingFamily", substituteRepository.countByStatus(SubstituteStatus.DOCTOR_CONFIRMED));
+        data.put("substituteTracking", substituteTracking);
+        data.put("substituteReviewed", substituteRepository.countByStatus(SubstituteStatus.DOCTOR_REVIEWED));
+        data.put("substituteRejected", substituteRepository.countByStatus(SubstituteStatus.FAMILY_REJECTED));
+        data.put("replenishPending", replenishRepository.countByStatus(ReplenishStatus.PENDING)
+                + replenishRepository.countByStatus(ReplenishStatus.ORDERED));
+        List<Map<String, Object>> replenishList = new ArrayList<>();
+        replenishRepository.findAllByOrderByCreatedAtDesc().stream()
+                .filter(t -> t.getStatus() != ReplenishStatus.CLOSED)
+                .forEach(t -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("taskNo", t.getTaskNo());
+                    m.put("materialName", t.getMaterial().getName());
+                    m.put("requiredQty", t.getRequiredQty());
+                    m.put("status", t.getStatus());
+                    m.put("patientName", t.getPatient() == null ? "-" : t.getPatient().getName());
+                    m.put("reason", t.getReason());
+                    replenishList.add(m);
+                });
+        data.put("replenishTasks", replenishList);
 
         // 金额概览（近 30 天账单）
         LocalDate since = LocalDate.now().minusDays(30);

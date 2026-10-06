@@ -19,7 +19,14 @@ const L = {
   ComplianceStatus: { PENDING: '待审查', COMPLIANT: '合规', VIOLATION: '存疑/违规' },
   RiskSeverity: { LOW: '一般', MEDIUM: '较重', HIGH: '严重' },
   RiskEventStatus: { OPEN: '待处理', CONFIRMED: '已确认', CLOSED: '已闭环' },
-  MaterialTxType: { OUT: '领用消耗', IN: '入库', ADJUST: '盘点调整' }
+  MaterialTxType: { OUT: '领用消耗', IN: '入库', ADJUST: '盘点调整' },
+  SubstituteStatus: {
+    PROPOSED: '待医生确认', DOCTOR_CONFIRMED: '待家属签字', FAMILY_AGREED: '家属已同意·待执行',
+    FAMILY_REJECTED: '家属拒绝·补货中', EXECUTED: '已执行·追踪中', DOCTOR_REVIEWED: '医生已回看调整', REVOKED: '医生不予替代'
+  },
+  SubstituteFollowUp: { NORMAL: '愈合正常', SLOW: '愈合变慢', ALLERGY: '出现过敏' },
+  ReplenishStatus: { PENDING: '待采购', ORDERED: '已下单待到货', ARRIVED: '已到货入库', CLOSED: '已闭环' },
+  CareAdjustStatus: { PROPOSED: '待补做/执行', DONE: '已调整完成' }
 }
 
 export function label(group, value) {
@@ -37,7 +44,14 @@ export function tagType(group, value) {
     BillStatus: { DRAFT: 'warning', CONFIRMED: 'primary', INSURANCE_REVIEWED: 'success', DISPUTED: 'danger', SETTLED: 'success' },
     ComplianceStatus: { PENDING: 'info', COMPLIANT: 'success', VIOLATION: 'danger' },
     RiskSeverity: { LOW: 'success', MEDIUM: 'warning', HIGH: 'danger' },
-    RiskEventStatus: { OPEN: 'danger', CONFIRMED: 'warning', CLOSED: 'success' }
+    RiskEventStatus: { OPEN: 'danger', CONFIRMED: 'warning', CLOSED: 'success' },
+    SubstituteStatus: {
+      PROPOSED: 'warning', DOCTOR_CONFIRMED: 'danger', FAMILY_AGREED: 'primary',
+      FAMILY_REJECTED: 'info', EXECUTED: 'success', DOCTOR_REVIEWED: '', REVOKED: 'info'
+    },
+    SubstituteFollowUp: { NORMAL: 'success', SLOW: 'warning', ALLERGY: 'danger' },
+    ReplenishStatus: { PENDING: 'danger', ORDERED: 'warning', ARRIVED: 'success', CLOSED: 'info' },
+    CareAdjustStatus: { PROPOSED: 'warning', DONE: 'success' }
   }
   return map[group]?.[value] || 'info'
 }

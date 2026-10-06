@@ -134,4 +134,30 @@ public final class DomainEnums {
 
     public enum MaterialTxType { OUT("领用消耗"), IN("入库"), ADJUST("盘点调整");
         public final String label; MaterialTxType(String l) { this.label = l; } }
+
+    /** 耗材缺货替代确认流程状态 */
+    public enum SubstituteStatus {
+        PROPOSED("护士已申请·待医生确认"),
+        DOCTOR_CONFIRMED("医生已确认·待家属签字"),
+        FAMILY_AGREED("家属已同意·待执行"),
+        FAMILY_REJECTED("家属不同意·已转补货"),
+        EXECUTED("替代已执行·效果追踪中"),
+        DOCTOR_REVIEWED("医生已回看并调整"),
+        REVOKED("医生不予替代");
+        public final String label; SubstituteStatus(String l) { this.label = l; } }
+
+    /** 替代材料后续伤口效果评估 */
+    public enum SubstituteFollowUp {
+        NORMAL("愈合正常"), SLOW("愈合变慢"), ALLERGY("出现过敏反应");
+        public final String label; SubstituteFollowUp(String l) { this.label = l; } }
+
+    /** 补货任务状态 */
+    public enum ReplenishStatus {
+        PENDING("待采购"), ORDERED("已下单待到货"), ARRIVED("已到货入库"), CLOSED("已关闭");
+        public final String label; ReplenishStatus(String l) { this.label = l; } }
+
+    /** 拒绝替代后的本次护理计划调整状态 */
+    public enum CareAdjustStatus {
+        PROPOSED("待补做/执行"), DONE("已调整完成");
+        public final String label; CareAdjustStatus(String l) { this.label = l; } }
 }

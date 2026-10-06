@@ -65,7 +65,9 @@
         <div class="section-title mt-16">耗材/冷链领用</div>
         <el-table :data="detailData.materialTransactions" size="small">
           <el-table-column label="耗材"><template #default="{row}">{{ row.material.name }}
-            <el-tag v-if="row.material.coldChain" size="small" type="primary" effect="plain">冷链</el-tag></template></el-table-column>
+            <el-tag v-if="row.material.coldChain" size="small" type="primary" effect="plain">冷链</el-tag>
+            <el-tag v-if="row.substitute" size="small" type="warning" effect="plain">缺货替代</el-tag>
+          </template></el-table-column>
           <el-table-column prop="quantity" label="数量" width="60" align="center" />
           <el-table-column label="交接温度" width="100">
             <template #default="{row}">
@@ -77,6 +79,16 @@
             </template>
           </el-table-column>
         </el-table>
+
+        <div v-if="detailData.substitutes?.length" class="section-title mt-16">
+          耗材缺货替代确认（{{ detailData.substitutes.length }}）
+        </div>
+        <div v-for="s in detailData.substitutes" :key="s.id" class="sub-line">
+          <el-tag size="small" :type="tagType('SubstituteStatus',s.status)">{{ label('SubstituteStatus',s.status) }}</el-tag>
+          <span class="ml8"><b>{{ s.originalMaterial.name }}</b>（缺货）→ <b>{{ s.substituteMaterial.name }}</b></span>
+          <span class="muted ml8">医保差 {{ s.insuranceDiff }} / 自费差 {{ s.selfPayDiff }}</span>
+          <el-button link type="primary" size="small" class="ml8" @click="goSubstitute(s)">替代确认详情</el-button>
+        </div>
 
         <div class="section-title mt-16">现场照片</div>
         <el-image v-for="p in detailData.photos" :key="p.id" :src="p.filePath"
@@ -194,6 +206,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
 import api from '../api'
 import { useAuthStore } from '../store/auth'
 import { ENUMS, label, tagType } from '../labels'
@@ -201,6 +214,7 @@ import SignPad from '../components/SignPad.vue'
 import UploadPhotos from '../components/UploadPhotos.vue'
 
 const auth = useAuthStore()
+const router = useRouter()
 const visits = ref([])
 const loading = ref(true)
 const filter = ref(auth.isNurse ? 'SCHEDULED' : '')
@@ -305,6 +319,10 @@ async function submitOrder() {
   ElMessage.success('医嘱已下达，等待另一位医生远程复核')
   orderVisible.value = false
 }
+
+function goSubstitute(s) {
+  router.push({ path: '/substitutes', query: { id: s.id } })
+}
 </script>
 
 <style scoped>
@@ -315,4 +333,6 @@ async function submitOrder() {
 .photo-thumb { width: 120px; height: 80px; border-radius: 6px; margin: 4px 8px 4px 0; border: 1px solid #ddd; }
 .sign-box { text-align: center; }
 .sign-img { width: 260px; height: 100px; border: 1px solid #eee; border-radius: 6px; background: #fafafa; }
+.sub-line { padding: 6px 0; border-bottom: 1px dashed #ebeef5; font-size: 13px; }
+.ml8 { margin-left: 8px; }
 </style>

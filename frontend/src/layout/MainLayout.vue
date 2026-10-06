@@ -50,6 +50,7 @@ const ALL_MENUS = [
   { path: '/orders', title: '医嘱与远程复核', icon: 'FirstAidKit', roles: ['FAMILY_DOCTOR', 'ADMIN', 'NURSE'] },
   { path: '/risks', title: '风险事件', icon: 'Alert', roles: ['ADMIN', 'FAMILY_DOCTOR', 'NURSE'] },
   { path: '/materials', title: '耗材与冷链', icon: 'Box', roles: ['ADMIN', 'FINANCE', 'NURSE'] },
+  { path: '/substitutes', title: '缺货替代确认', icon: 'Switch', roles: ['NURSE', 'ADMIN', 'FAMILY_DOCTOR', 'FAMILY'] },
   { path: '/bills', title: '统一账单', icon: 'Money', roles: ['FAMILY', 'FINANCE', 'ADMIN', 'INSURANCE_AUDITOR'] },
   { path: '/catalogs', title: '收费医保目录', icon: 'Tickets', roles: ['FINANCE', 'ADMIN'] },
   { path: '/compliance', title: '医保合规审查', icon: 'CircleCheck', roles: ['INSURANCE_AUDITOR', 'ADMIN', 'FINANCE'] },

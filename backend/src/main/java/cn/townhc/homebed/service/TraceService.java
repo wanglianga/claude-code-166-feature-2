@@ -27,6 +27,10 @@ public class TraceService {
     private final VisitExceptionRepository exceptionRepository;
     private final MaterialTransactionRepository materialTxRepository;
     private final MedicalOrderRepository orderRepository;
+    private final MaterialSubstituteRepository substituteRepository;
+    private final SubstituteTrackingRepository substituteTrackingRepository;
+    private final MaterialReplenishTaskRepository replenishRepository;
+    private final CarePlanAdjustmentRepository adjustmentRepository;
     private final BillRepository billRepository;
     private final BillItemRepository billItemRepository;
     private final ComplianceRecordRepository complianceRepository;
@@ -57,10 +61,31 @@ public class TraceService {
                 node.put("exceptions", exceptionRepository.findByVisitId(v.getId()));
                 node.put("materialTransactions", materialTxRepository.findByVisitId(v.getId()));
                 node.put("orders", orderRepository.findByVisitId(v.getId()));
+                node.put("substitutes", substituteRepository.findByVisitId(v.getId()));
                 visitChain.add(node);
             }
         }
         root.put("visitChain", visitChain);
+
+        // 耗材缺货替代确认（含效果追踪与照片）、补货任务、护理计划调整
+        List<MaterialSubstitute> substitutes = substituteRepository
+                .findByPatientIdOrderByCreatedAtDesc(patientId);
+        List<Map<String, Object>> substituteChain = new ArrayList<>();
+        for (MaterialSubstitute s : substitutes) {
+            Map<String, Object> sm = new LinkedHashMap<>();
+            initSubstitute(s);
+            sm.put("substitute", s);
+            List<SubstituteTracking> trs = substituteTrackingRepository
+                    .findBySubstituteIdOrderByRecordedAtAsc(s.getId());
+            trs.forEach(t -> {
+                if (t.getRecorder() != null) org.hibernate.Hibernate.initialize(t.getRecorder());
+            });
+            sm.put("trackings", trs);
+            substituteChain.add(sm);
+        }
+        root.put("substitutes", substituteChain);
+        root.put("replenishTasks", replenishRepository.findByPatientIdOrderByCreatedAtDesc(patientId));
+        root.put("careAdjustments", adjustmentRepository.findByPatientIdOrderByCreatedAtDesc(patientId));
 
         List<Map<String, Object>> bills = new ArrayList<>();
         for (Bill b : billRepository.findByApplicationId(applicationId)) {
@@ -82,7 +107,7 @@ public class TraceService {
             if (seen.add(l.getId())) logs.add(l);
         }
         logs.sort(Comparator.comparing(AuditLog::getOccurredAt));
-        root.put("timeline", buildTimeline(app, visitChain, bills, logs));
+        root.put("timeline", buildTimeline(app, visitChain, substituteChain, bills, logs));
         root.put("auditLogs", logs);
         return root;
     }
@@ -90,6 +115,7 @@ public class TraceService {
     /** 输出结构化时间线（阶段/时间/角色/事件/证据） */
     private List<Map<String, Object>> buildTimeline(BedApplication app,
                                                     List<Map<String, Object>> visitChain,
+                                                    List<Map<String, Object>> substituteChain,
                                                     List<Map<String, Object>> bills,
                                                     List<AuditLog> logs) {
         List<Map<String, Object>> timeline = new ArrayList<>();
@@ -149,6 +175,24 @@ public class TraceService {
                                 + (e.getHandleConclusion() != null ? "；处理：" + e.getHandleConclusion() : ""),
                         e.getEvidencePath() == null ? List.of() : List.of(e.getEvidencePath()));
             }
+            @SuppressWarnings("unchecked")
+            List<MaterialSubstitute> subs = (List<MaterialSubstitute>) node.get("substitutes");
+            if (subs != null) {
+                for (MaterialSubstitute s : subs) {
+                    addSubstituteTimeline(timeline, s);
+                }
+            }
+        }
+        // 非挂在巡诊节点下的替代单（如计划阶段发起）补齐
+        java.util.Set<Long> inChain = new java.util.HashSet<>();
+        for (Map<String, Object> node : visitChain) {
+            @SuppressWarnings("unchecked")
+            List<MaterialSubstitute> subs = (List<MaterialSubstitute>) node.get("substitutes");
+            if (subs != null) subs.forEach(s -> inChain.add(s.getId()));
+        }
+        for (Map<String, Object> bm2 : substituteChain) {
+            MaterialSubstitute s = (MaterialSubstitute) bm2.get("substitute");
+            if (!inChain.contains(s.getId())) addSubstituteTimeline(timeline, s);
         }
         for (Map<String, Object> bm : bills) {
             Bill b = (Bill) bm.get("bill");
@@ -175,6 +219,99 @@ public class TraceService {
 
     private String nz(String s) { return s == null || s.isBlank() ? "-" : s; }
     private String safeName(SysUser u) { return u == null ? "-" : u.getName(); }
+
+    private void initSubstitute(MaterialSubstitute s) {
+        org.hibernate.Hibernate.initialize(s.getPatient());
+        org.hibernate.Hibernate.initialize(s.getOriginalMaterial());
+        org.hibernate.Hibernate.initialize(s.getSubstituteMaterial());
+        if (s.getProposer() != null) org.hibernate.Hibernate.initialize(s.getProposer());
+        if (s.getDoctor() != null) org.hibernate.Hibernate.initialize(s.getDoctor());
+        if (s.getReviewDoctor() != null) org.hibernate.Hibernate.initialize(s.getReviewDoctor());
+        if (s.getExecutedBy() != null) org.hibernate.Hibernate.initialize(s.getExecutedBy());
+        if (s.getReviewOrder() != null) {
+            org.hibernate.Hibernate.initialize(s.getReviewOrder());
+            if (s.getReviewOrder().getDoctor() != null) org.hibernate.Hibernate.initialize(s.getReviewOrder().getDoctor());
+        }
+        if (s.getReplenishTask() != null) {
+            org.hibernate.Hibernate.initialize(s.getReplenishTask());
+            org.hibernate.Hibernate.initialize(s.getReplenishTask().getMaterial());
+        }
+        if (s.getCareAdjustment() != null) org.hibernate.Hibernate.initialize(s.getCareAdjustment());
+    }
+
+    /** 把一张缺货替代确认单的完整链路（申请→医生确认→家属签字→执行→追踪→回看调整/拒绝补货）写入时间线 */
+    private void addSubstituteTimeline(List<Map<String, Object>> timeline, MaterialSubstitute s) {
+        add(timeline, s.getCreatedAt(), "耗材替代", "护士·" + safeName(s.getProposer()),
+                s.getSubstituteNo() + " 缺货替代申请",
+                "原医嘱/方案：" + nz(s.getOriginalUsageSnapshot())
+                        + "\n原品：" + s.getOriginalMaterial().getName()
+                        + nz(s.getOriginalMaterial().getSpec()) + "（库存不足" + nz(s.getShortageNote()) + "）"
+                        + "\n替代：" + s.getSubstituteMaterial().getName()
+                        + nz(s.getSubstituteMaterial().getSpec())
+                        + "\n医保差异：总费用 " + s.getTotalDiff() + "、医保报销 " + s.getInsuranceDiff()
+                        + "、家属自费 " + s.getSelfPayDiff()
+                        + "\n可能影响：" + nz(s.getPossibleImpact()),
+                null);
+        if (s.getDoctorConfirmedAt() != null) {
+            add(timeline, s.getDoctorConfirmedAt(), "耗材替代", "医生·" + safeName(s.getDoctor()),
+                    s.getSubstituteNo() + (Boolean.TRUE.equals(s.getDoctorApproved())
+                            ? " 医生确认同意替代" : " 医生不予替代"),
+                    s.getDoctorComment(), null);
+        }
+        if (s.getFamilySignedAt() != null) {
+            boolean agreed = s.getStatus() != cn.townhc.homebed.domain.enums.DomainEnums.SubstituteStatus.FAMILY_REJECTED;
+            add(timeline, s.getFamilySignedAt(), "家属签字", s.getFamilySignName(),
+                    s.getSubstituteNo() + (agreed ? " 家属签字同意替代" : " 家属不同意替代"),
+                    (agreed ? "家属知情同意按替代材料执行" : "家属要求继续使用原品，系统已生成补货任务并调整本次护理计划")
+                            + "；意见：" + nz(s.getFamilyDecisionNote()),
+                    s.getFamilySignPath() == null ? List.of() : List.of(s.getFamilySignPath()));
+        }
+        if (s.getExecutedAt() != null) {
+            add(timeline, s.getExecutedAt(), "耗材替代", "护士·" + safeName(s.getExecutedBy()),
+                    s.getSubstituteNo() + " 替代材料已执行",
+                    s.getSubstituteMaterial().getName() + " 领用 " + s.getQuantity()
+                            + s.getSubstituteMaterial().getUnit()
+                            + (s.getBatchNo() != null ? "，批号 " + s.getBatchNo() : "")
+                            + "；" + nz(s.getExecutionNote()), null);
+        }
+        for (SubstituteTracking t : substituteTrackingRepository
+                .findBySubstituteIdOrderByRecordedAtAsc(s.getId())) {
+            List<String> photos = photoRepository.findAll().stream()
+                    .filter(p -> p.getSubstitute() != null && p.getSubstitute().getId().equals(s.getId())
+                            && p.getCreatedAt() != null
+                            && (t.getRecordedAt() == null || !p.getCreatedAt().isAfter(t.getRecordedAt())))
+                    .map(VisitPhoto::getFilePath).toList();
+            add(timeline, t.getRecordedAt(), "替代追踪", safeName(t.getRecorder()),
+                    s.getSubstituteNo() + " 伤口效果：" + t.getOutcome().label,
+                    nz(t.getNote()), photos.isEmpty() ? null : photos);
+        }
+        if (s.getReviewedAt() != null) {
+            add(timeline, s.getReviewedAt(), "耗材替代", "医生·" + safeName(s.getReviewDoctor()),
+                    s.getSubstituteNo() + " 医生回看替代原因并调整护理材料",
+                    "回看结论：" + nz(s.getReviewComment())
+                            + "\n后续护理材料调整：" + nz(s.getReviewAction())
+                            + (s.getReviewOrder() != null ? "\n已下医嘱 " + s.getReviewOrder().getOrderNo() : ""),
+                    null);
+        }
+        if (s.getReplenishTask() != null) {
+            MaterialReplenishTask t = s.getReplenishTask();
+            add(timeline, t.getCreatedAt(), "补货任务", "系统/护士",
+                    t.getTaskNo() + " 补货任务（" + t.getStatus().label + "）",
+                    t.getMaterial().getName() + " x" + t.getRequiredQty()
+                            + "；原因：" + nz(t.getReason())
+                            + (t.getArrivedAt() != null ? "；已于 " + t.getArrivedAt() + " 到货入库" : ""),
+                    null);
+        }
+        if (s.getCareAdjustment() != null) {
+            CarePlanAdjustment a = s.getCareAdjustment();
+            add(timeline, a.getCreatedAt(), "护理计划调整", "系统",
+                    a.getAdjustNo() + " 本次护理计划调整（" + a.getStatus().label + "）",
+                    "调整：" + nz(a.getAdjustmentContent())
+                            + "；计划补做：" + a.getExpectedMakeupAt()
+                            + (a.getCompletedAt() != null ? "；已完成补做：" + a.getCompletionNote() : ""),
+                    null);
+        }
+    }
 
     private void add(List<Map<String, Object>> timeline, java.time.LocalDateTime time,
                      String stage, String actor, String title, String detail, List<String> evidences) {

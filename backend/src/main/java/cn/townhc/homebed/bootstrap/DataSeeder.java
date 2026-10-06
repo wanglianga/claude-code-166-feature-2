@@ -47,6 +47,10 @@ public class DataSeeder implements CommandLineRunner {
     private final ChargeCatalogRepository catalogRepository;
     private final MedicalOrderRepository orderRepository;
     private final RiskEventRepository riskRepository;
+    private final MaterialSubstituteRepository substituteRepository;
+    private final SubstituteTrackingRepository substituteTrackingRepository;
+    private final MaterialReplenishTaskRepository replenishRepository;
+    private final CarePlanAdjustmentRepository careAdjustmentRepository;
     private final PasswordEncoder passwordEncoder;
     private final BillingService billingService;
 
@@ -118,8 +122,18 @@ public class DataSeeder implements CommandLineRunner {
                 bd("68"), true, "乙类", bd("0.70"), true, "2-8℃冷链保存运输", null);
         ChargeCatalog antibiotic = catalog("DR002", "头孢呋辛酯片", CatalogCategory.DRUG, "盒",
                 bd("26"), true, "甲类", bd("0.90"), false, null, null);
+        // 缺货替代演示用目录：原品藻酸盐（乙类报销）/ 泡沫敷料（丙类自费）/ 水胶体（甲类）/ 硅胶导尿包（乙类）
+        ChargeCatalog alginate = catalog("HC004", "藻酸盐伤口敷料", CatalogCategory.CONSUMABLE, "片",
+                bd("28"), true, "乙类", bd("0.60"), false, null, null);
+        ChargeCatalog foam = catalog("HC005", "自粘性泡沫敷料", CatalogCategory.CONSUMABLE, "片",
+                bd("12"), false, "丙类", bd("0"), false, null, null);
+        ChargeCatalog hydrocolloid = catalog("HC006", "水胶体敷料", CatalogCategory.CONSUMABLE, "片",
+                bd("18"), true, "甲类", bd("0.90"), false, null, null);
+        ChargeCatalog catheterAlt = catalog("HC007", "一次性硅胶导尿包", CatalogCategory.CONSUMABLE, "套",
+                bd("24"), true, "乙类", bd("0.60"), false, null, null);
         catalogRepository.saveAll(List.of(visitFee, ulcer, dressing, catheter, glucose, bp,
-                inject, dressingKit, catheterKit, gauze, insulin, antibiotic));
+                inject, dressingKit, catheterKit, gauze, insulin, antibiotic,
+                alginate, foam, hydrocolloid, catheterAlt));
 
         // ===== 耗材库存 =====
         Material mDressingKit = material("HC001", "一次性换药包", "无菌独立包装", "个",
@@ -132,7 +146,17 @@ public class DataSeeder implements CommandLineRunner {
                 CatalogCategory.COLDCHAIN_DRUG, 9, 6, bd("52"), insulin, true);
         Material mAntibiotic = material("DR002", "头孢呋辛酯片", "0.25g*12片", "盒",
                 CatalogCategory.DRUG, 14, 5, bd("18"), antibiotic, false);
-        materialRepository.saveAll(List.of(mDressingKit, mCatheterKit, mGauze, mInsulin, mAntibiotic));
+        // 替代演示材料：藻酸盐敷料（缺货原品，库存0）；泡沫敷料（丙类自费替代品）；水胶体（甲类替代品，曾致过敏）
+        Material mAlginate = material("HC004", "藻酸盐伤口敷料", "10cm*10cm 片状", "片",
+                CatalogCategory.CONSUMABLE, 0, 5, bd("19"), alginate, false);
+        Material mFoam = material("HC005", "自粘性泡沫敷料", "10cm*10cm", "片",
+                CatalogCategory.CONSUMABLE, 16, 5, bd("7"), foam, false);
+        Material mHydrocolloid = material("HC006", "水胶体敷料", "10cm*10cm 薄型", "片",
+                CatalogCategory.CONSUMABLE, 8, 5, bd("11"), hydrocolloid, false);
+        Material mCatheterAlt = material("HC007", "一次性硅胶导尿包", "F16 硅胶", "套",
+                CatalogCategory.CONSUMABLE, 5, 4, bd("15"), catheterAlt, false);
+        materialRepository.saveAll(List.of(mDressingKit, mCatheterKit, mGauze, mInsulin, mAntibiotic,
+                mAlginate, mFoam, mHydrocolloid, mCatheterAlt));
 
         // ===== 申请单 =====
         BedApplication a1 = submittedApp(p1, family,
@@ -350,6 +374,11 @@ public class DataSeeder implements CommandLineRunner {
         shortAge.setDescription("一次性导尿包仅剩 6 套且多个患者共用，本批次尚未配送");
         shortAge.setStatus(ExceptionStatus.REPORTED);
         exceptionRepository.save(shortAge);
+
+        // ===== 耗材缺货替代确认演示数据 =====
+        seedSubstitutes(p2, plan2, v1, v2, future1, future2, future3,
+                doctor1, doctor2, nurse1, admin, family,
+                mAlginate, mFoam, mHydrocolloid, mCatheterKit, mCatheterAlt);
 
         // ===== 患者3（远距离高风险）计划与任务 =====
         VisitPlan plan3 = new VisitPlan();
@@ -611,6 +640,288 @@ public class DataSeeder implements CommandLineRunner {
         tx.setNote(note);
         tx.setOccurredAt(v.getCompletedAt());
         materialTxRepository.save(tx);
+    }
+
+    /**
+     * 耗材缺货替代确认演示素材：
+     * S1 藻酸盐→水胶体（甲类报销更高）：家属同意→执行→后续照片追踪愈合正常（账单 R8 可解释提示）；
+     * S2 藻酸盐→泡沫敷料（丙类全自费）：家属同意→执行→先变慢后过敏→自动风险→医生回看替代原因并下调整医嘱；
+     * S3 待医生确认；S4 医生已确认待家属签字；S5 家属拒绝→补货任务+本次护理计划调整。
+     */
+    private void seedSubstitutes(Patient p2, VisitPlan plan2, Visit v1, Visit v2,
+                                 Visit future1, Visit future2, Visit future3,
+                                 SysUser doctor1, SysUser doctor2, SysUser nurse1,
+                                 SysUser admin, SysUser family,
+                                 Material mAlginate, Material mFoam, Material mHydrocolloid,
+                                 Material mCatheterKit, Material mCatheterAlt) throws Exception {
+        String shortage = "卫生院库房藻酸盐伤口敷料库存 0，本批次县公司配送延误，预计 3 天后到货";
+
+        // 原医嘱：规定继续使用藻酸盐敷料（替代单展示“原医嘱”的依据）
+        MedicalOrder o3 = new MedicalOrder();
+        o3.setOrderNo("YZ20260927001");
+        o3.setPatient(p2);
+        o3.setPlan(plan2);
+        o3.setDoctor(doctor1);
+        o3.setOrderType(OrderType.CARE_PLAN_CHANGE);
+        o3.setContent("右膝术后切口继续使用藻酸盐伤口敷料 10cm*10cm 隔日换药，保持创面湿性愈合；如渗液浸透及时更换");
+        o3.setDiagnosisBasis("术后切口少量渗液，藻酸盐敷料适配中量渗出创面");
+        o3.setStatus(OrderStatus.REMOTE_REVIEWED);
+        o3.setReviewer(doctor2);
+        o3.setReviewComment("同意继续使用藻酸盐敷料方案");
+        o3.setReviewedAt(LocalDateTime.now().minusDays(7));
+        orderRepository.save(o3);
+
+        // ---------- S1：同意→执行→追踪正常 ----------
+        LocalDateTime t1 = v1.getCompletedAt().minusMinutes(30);
+        String sign1 = placeholderImage("sign", "刘桂兰 同意水胶体替代 " + t1.toLocalDate(), new Color(255, 240, 220));
+        String exec1 = placeholderImage("substitute", "水胶体贴敷当日伤口 " + t1.toLocalDate(), new Color(230, 255, 235));
+        MaterialSubstitute s1 = new MaterialSubstitute();
+        s1.setSubstituteNo("TD20260929001");
+        s1.setPatient(p2); s1.setVisit(v1); s1.setPlan(plan2); s1.setRelatedOrder(o3);
+        s1.setProposer(nurse1);
+        s1.setOriginalMaterial(mAlginate); s1.setSubstituteMaterial(mHydrocolloid); s1.setQuantity(1);
+        s1.setShortageNote(shortage);
+        s1.setPossibleImpact("水胶体为密闭湿性愈合敷料，吸收量低于藻酸盐，渗液多时需缩短更换间隔；偶见黏胶接触过敏，使用后须观察伤口周缘皮肤");
+        s1.setOriginalUsageSnapshot("医嘱 " + o3.getOrderNo() + "（" + o3.getOrderType().label + "）：" + o3.getContent());
+        fillSnap(s1, "28", "乙类", bd("0.60"), true, "28.00", "16.80", "11.20",
+                "18", "甲类", bd("0.90"), true, "18.00", "16.20", "1.80",
+                "-10.00", "-0.60", "-9.40");
+        s1.setStatus(SubstituteStatus.EXECUTED);
+        s1.setDoctor(doctor1); s1.setDoctorApproved(true);
+        s1.setDoctorComment("水胶体适用浅表层渗出较少创面，同意本次替代；嘱咐家属观察浸渍与过敏，有异常随诊");
+        s1.setDoctorConfirmedAt(t1.minusMinutes(15));
+        s1.setFamilySignName("刘桂兰"); s1.setFamilySignPath(sign1); s1.setFamilySignedAt(t1.minusMinutes(10));
+        s1.setFamilyDecisionNote("已知情报销差异，同意使用");
+        mHydrocolloid.setStockQty(mHydrocolloid.getStockQty() - 1);
+        materialRepository.save(mHydrocolloid);
+        MaterialTransaction tx1 = substituteTx(s1, mHydrocolloid, 1, "H20260925", v1, nurse1, t1);
+        s1.setExecutedBy(nurse1); s1.setExecutedAt(t1); s1.setBatchNo("H20260925"); s1.setExecutedTx(tx1);
+        s1.setExecutionNote("伤口清洁后贴敷水胶体敷料，边缘固定良好，已交代观察事项");
+        s1.setLatestOutcome(SubstituteFollowUp.NORMAL);
+        s1.setLatestOutcomeAt(v2.getCompletedAt());
+        substituteRepository.save(s1);
+        subPhoto(s1, v1, exec1, "替代执行当日：水胶体贴敷后伤口");
+        // 3 天后复查追踪：愈合正常
+        SubstituteTracking tr1 = new SubstituteTracking();
+        tr1.setSubstitute(s1); tr1.setVisit(v2); tr1.setOutcome(SubstituteFollowUp.NORMAL);
+        tr1.setNote("切口继续对合，水胶体无卷边浸渍，周缘皮肤正常，愈合进度符合预期");
+        tr1.setRecorder(nurse1); tr1.setRecordedAt(v2.getCompletedAt());
+        String track1 = placeholderImage("substitute", "3天后复查 愈合正常 " + v2.getCompletedAt().toLocalDate(), new Color(232, 252, 238));
+        tr1.setPhotoCount(1);
+        substituteTrackingRepository.save(tr1);
+        subPhoto(s1, v2, track1, "随访追踪：愈合正常");
+
+        // ---------- S2：同意→执行→变慢→过敏→医生回看调整 ----------
+        LocalDateTime t2 = v2.getCompletedAt().minusMinutes(20);
+        String sign2 = placeholderImage("sign", "刘桂兰 同意泡沫敷料替代 " + t2.toLocalDate(), new Color(255, 240, 220));
+        String exec2 = placeholderImage("substitute", "泡沫敷料使用当日 " + t2.toLocalDate(), new Color(228, 242, 255));
+        MaterialSubstitute s2 = new MaterialSubstitute();
+        s2.setSubstituteNo("TD20261002002");
+        s2.setPatient(p2); s2.setVisit(v2); s2.setPlan(plan2);
+        s2.setProposer(nurse1);
+        s2.setOriginalMaterial(mAlginate); s2.setSubstituteMaterial(mFoam); s2.setQuantity(2);
+        s2.setShortageNote(shortage + "；水胶体库存亦仅余少量需留给压疮患者");
+        s2.setPossibleImpact("泡沫敷料无藻酸盐的凝胶填充作用，对中量渗液创面愈合速度可能变慢；本品为丙类耗材医保不予报销，2 片需全自费 24 元；黏胶过敏风险高于水胶体");
+        s2.setOriginalUsageSnapshot("护理计划 " + plan2.getPlanNo() + "：" + plan2.getPlanContent()
+                + "\n原医嘱材料：藻酸盐伤口敷料 10cm*10cm（乙类报销 60%）");
+        fillSnap(s2, "28", "乙类", bd("0.60"), true, "56.00", "33.60", "22.40",
+                "12", "丙类", bd("0"), false, "24.00", "0.00", "24.00",
+                "-32.00", "-33.60", "1.60");
+        s2.setStatus(SubstituteStatus.DOCTOR_REVIEWED);
+        s2.setDoctor(doctor1); s2.setDoctorApproved(true);
+        s2.setDoctorComment("确属缺货应急，告知家属丙类自费与愈合风险，家属同意后使用；加强随访，渗液增多立即上报");
+        s2.setDoctorConfirmedAt(t2.minusMinutes(12));
+        s2.setFamilySignName("刘桂兰"); s2.setFamilySignPath(sign2); s2.setFamilySignedAt(t2.minusMinutes(8));
+        s2.setFamilyDecisionNote("村里买不到原品，同意先用泡沫敷料，知道两片要自费 24 元");
+        mFoam.setStockQty(mFoam.getStockQty() - 2);
+        materialRepository.save(mFoam);
+        MaterialTransaction tx2 = substituteTx(s2, mFoam, 2, "F20260918", v2, nurse1, t2);
+        s2.setExecutedBy(nurse1); s2.setExecutedAt(t2); s2.setBatchNo("F20260918"); s2.setExecutedTx(tx2);
+        s2.setExecutionNote("泡沫敷料 2 片覆盖切口及外固定，当日局部无异常");
+        substituteRepository.save(s2);
+        subPhoto(s2, v2, exec2, "替代执行当日：泡沫敷料使用情况");
+        // 追踪 1：愈合变慢
+        LocalDateTime slowAt = LocalDateTime.now().minusDays(2).withHour(15).withMinute(0).withSecond(0).withNano(0);
+        SubstituteTracking tr2 = new SubstituteTracking();
+        tr2.setSubstitute(s2); tr2.setVisit(v2); tr2.setOutcome(SubstituteFollowUp.SLOW);
+        tr2.setNote("家属来电反映泡沫敷料 24 小时即渗湿，伤口未见明显新鲜肉芽，较前两日愈合变慢");
+        tr2.setRecorder(nurse1); tr2.setRecordedAt(slowAt);
+        String slowImg = placeholderImage("substitute", "2天后 渗液仍多愈合变慢 " + slowAt.toLocalDate(), new Color(255, 246, 224));
+        tr2.setPhotoCount(1);
+        substituteTrackingRepository.save(tr2);
+        subPhoto(s2, v2, slowImg, "随访追踪：愈合变慢");
+        // 追踪 2：过敏
+        LocalDateTime allergyAt = LocalDateTime.now().minusDays(1).withHour(10).withMinute(30).withSecond(0).withNano(0);
+        SubstituteTracking tr3 = new SubstituteTracking();
+        tr3.setSubstitute(s2); tr3.setVisit(v2); tr3.setOutcome(SubstituteFollowUp.ALLERGY);
+        tr3.setNote("伤口周缘出现红斑、丘疹伴瘙痒，范围约 2cm，考虑泡沫敷料黏胶接触性皮炎，已停用");
+        tr3.setRecorder(nurse1); tr3.setRecordedAt(allergyAt);
+        String allergyImg = placeholderImage("substitute", "昨日 周缘红斑瘙痒过敏 " + allergyAt.toLocalDate(), new Color(255, 228, 228));
+        tr3.setPhotoCount(1);
+        substituteTrackingRepository.save(tr3);
+        subPhoto(s2, v2, allergyImg, "随访追踪：过敏反应");
+        // 过敏自动风险事件（医生回看前处于待处理）
+        RiskEvent allergyRisk = new RiskEvent();
+        allergyRisk.setRiskNo("FX20261004001");
+        allergyRisk.setPatient(p2);
+        allergyRisk.setVisit(v2);
+        allergyRisk.setRiskType("替代材料过敏反应");
+        allergyRisk.setSeverity(RiskSeverity.HIGH);
+        allergyRisk.setDescription("使用缺货替代材料[自粘性泡沫敷料]（替代原品藻酸盐伤口敷料，确认单 "
+                + s2.getSubstituteNo() + "）后伤口周缘红斑、丘疹伴瘙痒，考虑接触性皮炎，已停用并报医生");
+        allergyRisk.setStatus(RiskEventStatus.OPEN);
+        allergyRisk.setReporter(nurse1);
+        allergyRisk.setReportedAt(allergyAt);
+        riskRepository.save(allergyRisk);
+        // 医生回看替代原因 → 下护理方案调整医嘱
+        MedicalOrder o4 = new MedicalOrder();
+        o4.setOrderNo("YZ20261005001");
+        o4.setPatient(p2); o4.setVisit(v2); o4.setPlan(plan2); o4.setDoctor(doctor2);
+        o4.setOrderType(OrderType.CARE_PLAN_CHANGE);
+        o4.setContent("立即停用自粘性泡沫敷料：生理盐水清洁后改无菌纱布+凡士林油纱保护，局部过敏处外用炉甘石；"
+                + "待藻酸盐伤口敷料到货后换回原品；10 月 7 日上午上门复评皮炎与伤口，如红斑扩大或渗液增多转上级医院");
+        o4.setDiagnosisBasis("回看缺货替代确认单 " + s2.getSubstituteNo() + "：原品藻酸盐(乙类0.6)因缺货改用泡沫敷料(丙类自费)，"
+                + "随访先提示愈合变慢、次日出现伤口周缘红斑瘙痒，替代原因与知情签字链完整");
+        o4.setStatus(OrderStatus.PROPOSED);
+        orderRepository.save(o4);
+        s2.setReviewDoctor(doctor2);
+        s2.setReviewComment("替代系原品缺货的应急措施，医生确认与家属签字齐全；泡沫敷料对该患者渗出创面不适应并致敏，替代决策可还原");
+        s2.setReviewAction("停用泡沫敷料→无菌纱布+油纱过渡；藻酸盐到货后换回原品；加密随访至皮炎消退；患者纳入替代材料过敏名单");
+        s2.setReviewOrder(o4);
+        s2.setReviewedAt(LocalDateTime.now().minusHours(2));
+        s2.setLatestOutcome(SubstituteFollowUp.ALLERGY);
+        s2.setLatestOutcomeAt(allergyAt);
+        substituteRepository.save(s2);
+
+        // ---------- S3：护士已申请，待医生确认（明天的常规上门） ----------
+        MaterialSubstitute s3 = new MaterialSubstitute();
+        s3.setSubstituteNo("TD20261005003");
+        s3.setPatient(p2); s3.setVisit(future1); s3.setPlan(plan2);
+        s3.setProposer(nurse1);
+        s3.setOriginalMaterial(mAlginate); s3.setSubstituteMaterial(mFoam); s3.setQuantity(1);
+        s3.setShortageNote(shortage);
+        s3.setPossibleImpact("泡沫敷料吸收量可满足当前少量渗液；丙类全自费 12 元/片；存在黏胶过敏可能（该患者既往已对泡沫敷料过敏，需医生重点判断）");
+        s3.setOriginalUsageSnapshot("护理计划 " + plan2.getPlanNo() + "：伤口换药 3 次/周；沿用原医嘱藻酸盐伤口敷料");
+        fillSnap(s3, "28", "乙类", bd("0.60"), true, "28.00", "16.80", "11.20",
+                "12", "丙类", bd("0"), false, "12.00", "0.00", "12.00",
+                "-16.00", "-16.80", "0.80");
+        s3.setStatus(SubstituteStatus.PROPOSED);
+        substituteRepository.save(s3);
+
+        // ---------- S4：医生已确认，待家属签字（改期到周日的任务） ----------
+        MaterialSubstitute s4 = new MaterialSubstitute();
+        s4.setSubstituteNo("TD20261005004");
+        s4.setPatient(p2); s4.setVisit(future2); s4.setPlan(plan2);
+        s4.setProposer(nurse1);
+        s4.setOriginalMaterial(mAlginate); s4.setSubstituteMaterial(mHydrocolloid); s4.setQuantity(1);
+        s4.setShortageNote(shortage);
+        s4.setPossibleImpact("水胶体密闭湿性愈合，当前切口浅、渗出少，适用性好；报销比例高于原品，家属自费下降；仍需观察黏胶过敏");
+        s4.setOriginalUsageSnapshot("护理计划 " + plan2.getPlanNo() + "：伤口换药 3 次/周；沿用原医嘱藻酸盐伤口敷料");
+        fillSnap(s4, "28", "乙类", bd("0.60"), true, "28.00", "16.80", "11.20",
+                "18", "甲类", bd("0.90"), true, "18.00", "16.20", "1.80",
+                "-10.00", "-0.60", "-9.40");
+        s4.setStatus(SubstituteStatus.DOCTOR_CONFIRMED);
+        s4.setDoctor(doctor1); s4.setDoctorApproved(true);
+        s4.setDoctorComment("同意周日上门时使用水胶体替代，须向家属出示医保报销差异并取得签字后执行");
+        s4.setDoctorConfirmedAt(LocalDateTime.now().minusHours(3));
+        substituteRepository.save(s4);
+
+        // ---------- S5：家属拒绝 → 补货任务 + 本次护理计划调整 ----------
+        MaterialSubstitute s5 = new MaterialSubstitute();
+        s5.setSubstituteNo("TD20261005005");
+        s5.setPatient(p2); s5.setVisit(future3); s5.setPlan(plan2);
+        s5.setProposer(nurse1);
+        s5.setOriginalMaterial(mCatheterKit); s5.setSubstituteMaterial(mCatheterAlt); s5.setQuantity(1);
+        s5.setShortageNote("一次性导尿包多患者共用库存紧张，本批未配送到院");
+        s5.setPossibleImpact("硅胶导尿包生物相容性较好，但硅胶管身硬度与原乳胶款不同，置管与固定手感有差异；每套内增 2 元（报销后自费增加 0.80 元）");
+        s5.setOriginalUsageSnapshot("护理计划 " + plan2.getPlanNo() + "：留置导尿护理，按原医嘱使用一次性导尿包(F16)，每两周更换");
+        fillSnap(s5, "22", "乙类", bd("0.60"), true, "22.00", "13.20", "8.80",
+                "24", "乙类", bd("0.60"), true, "24.00", "14.40", "9.60",
+                "2.00", "1.20", "0.80");
+        s5.setStatus(SubstituteStatus.FAMILY_REJECTED);
+        s5.setDoctor(doctor1); s5.setDoctorApproved(true);
+        s5.setDoctorComment("硅胶包可替代，但尊重家属选择");
+        s5.setDoctorConfirmedAt(LocalDateTime.now().minusHours(5));
+        String sign5 = placeholderImage("sign", "刘桂兰 不同意硅胶替代 " + LocalDateTime.now().toLocalDate(), new Color(255, 240, 220));
+        s5.setFamilySignName("刘桂兰"); s5.setFamilySignPath(sign5);
+        s5.setFamilySignedAt(LocalDateTime.now().minusHours(4).withMinute(40));
+        s5.setFamilyDecisionNote("老人一直用原来的导尿包，不换牌子；请卫生院赶紧进货，晚两天换可以接受");
+        substituteRepository.save(s5);
+
+        MaterialReplenishTask rt = new MaterialReplenishTask();
+        rt.setTaskNo("BH20261005001");
+        rt.setMaterial(mCatheterKit);
+        rt.setRequiredQty(10);
+        rt.setReason("家属不同意使用替代材料[一次性硅胶导尿包]，要求按原医嘱使用[一次性导尿包]，紧急补货");
+        rt.setPatient(p2);
+        rt.setStatus(ReplenishStatus.ORDERED);
+        rt.setCreator(admin);
+        rt.setOrderNote("已电话县医药公司紧急调拨 10 套，随明日上午配送车次到院");
+        rt.setOrderedBy(admin);
+        rt.setOrderedAt(LocalDateTime.now().minusHours(3));
+        rt.setExpectedArrivalAt(LocalDateTime.now().plusDays(1).withHour(11).withMinute(0).withSecond(0).withNano(0));
+        replenishRepository.save(rt);
+        s5.setReplenishTask(rt);
+
+        CarePlanAdjustment ca = new CarePlanAdjustment();
+        ca.setAdjustNo("HL20261005001");
+        ca.setPatient(p2); ca.setVisit(future3); ca.setPlan(plan2); ca.setSubstitute(s5);
+        ca.setAdjustKind("本次暂缓导尿装置更换·到货补做");
+        ca.setOriginalPlanSnapshot(s5.getOriginalUsageSnapshot());
+        ca.setAdjustmentContent("尊重家属意见本次不使用硅胶替代包：本次上门行会阴护理、导尿管通畅度评估与尿液性状观察，"
+                + "原品导尿包到货后 24 小时内安排上门更换；期间家属注意尿管固定与饮水量，出现堵塞/发热立即联系");
+        ca.setExpectedMakeupAt(LocalDateTime.now().plusDays(2).withHour(9).withMinute(0).withSecond(0).withNano(0));
+        ca.setStatus(CareAdjustStatus.PROPOSED);
+        careAdjustmentRepository.save(ca);
+        s5.setCareAdjustment(ca);
+        substituteRepository.save(s5);
+
+        // 独立补货任务：缺货预警生成（藻酸盐，待采购）
+        MaterialReplenishTask rt2 = new MaterialReplenishTask();
+        rt2.setTaskNo("BH20261005002");
+        rt2.setMaterial(mAlginate);
+        rt2.setRequiredQty(20);
+        rt2.setReason("缺货预警：藻酸盐伤口敷料库存为 0，低于安全库存 5；在管伤口/压疮患者换药受影响");
+        rt2.setStatus(ReplenishStatus.PENDING);
+        rt2.setCreator(admin);
+        replenishRepository.save(rt2);
+    }
+
+    private void fillSnap(MaterialSubstitute s,
+                          String op, String oc, BigDecimal or, boolean ob, String ot, String oi, String os,
+                          String sp, String sc, BigDecimal sr, boolean sb, String st, String si, String ss,
+                          String td, String id, String sd) {
+        s.setOrigUnitPrice(bd(op)); s.setOrigInsuranceCategory(oc); s.setOrigReimbursementRate(or); s.setOrigReimbursable(ob);
+        s.setOrigTotalAmount(bd(ot)); s.setOrigInsuranceAmount(bd(oi)); s.setOrigSelfPayAmount(bd(os));
+        s.setSubUnitPrice(bd(sp)); s.setSubInsuranceCategory(sc); s.setSubReimbursementRate(sr); s.setSubReimbursable(sb);
+        s.setSubTotalAmount(bd(st)); s.setSubInsuranceAmount(bd(si)); s.setSubSelfPayAmount(bd(ss));
+        s.setTotalDiff(bd(td)); s.setInsuranceDiff(bd(id)); s.setSelfPayDiff(bd(sd));
+    }
+
+    private MaterialTransaction substituteTx(MaterialSubstitute s, Material m, int qty, String batch,
+                                             Visit v, SysUser nurse, LocalDateTime at) {
+        MaterialTransaction tx = new MaterialTransaction();
+        tx.setMaterial(m);
+        tx.setType(MaterialTxType.OUT);
+        tx.setQuantity(qty);
+        tx.setVisit(v);
+        tx.setOperator(nurse);
+        tx.setBatchNo(batch);
+        tx.setSubstitute(s);
+        tx.setNote("缺货替代执行：" + s.getSubstituteNo() + "，原品[" + s.getOriginalMaterial().getName()
+                + "]缺货，经医生确认及家属签字同意后替代使用");
+        tx.setOccurredAt(at);
+        return materialTxRepository.save(tx);
+    }
+
+    private void subPhoto(MaterialSubstitute s, Visit v, String path, String caption) {
+        VisitPhoto p = new VisitPhoto();
+        p.setVisit(v);
+        p.setSubstitute(s);
+        p.setFilePath(path);
+        p.setPhotoType("substitute_tracking");
+        p.setCaption(caption);
+        photoRepository.save(p);
     }
 
     private BigDecimal bd(String s) {

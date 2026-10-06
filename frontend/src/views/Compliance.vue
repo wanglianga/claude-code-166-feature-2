@@ -21,7 +21,7 @@
         <el-table-column label="命中规则">
           <template #default="{row}">
             <el-tag v-for="i in row.issues.slice(0,3)" :key="i.ruleCode" size="small"
-                    :type="i.severity==='VIOLATION'?'danger':'warning'" class="rule-tag">
+                    :type="i.severity==='VIOLATION'?'danger':i.severity==='INFO'?'success':'warning'" class="rule-tag">
               {{ i.ruleCode }}
             </el-tag>
             <el-tag v-if="row.issues.length>3" size="small">+{{ row.issues.length-3 }}</el-tag>
@@ -54,7 +54,7 @@
 
         <div v-if="!current.issues.length" class="ok-box">未命中任何风险规则：无重复收费、无超频次、签字/照片/冷链资料齐全。</div>
         <el-alert v-for="(i,idx) in current.issues" :key="idx" class="issue"
-                  :type="i.severity==='VIOLATION'?'error':'warning'" :closable="false" show-icon>
+                  :type="i.severity==='VIOLATION'?'error':i.severity==='INFO'?'success':'warning'" :closable="false" show-icon>
           <template #title>
             <div><b>{{ i.ruleCode }} · {{ ruleName[i.ruleCode] }}</b></div>
             <div>{{ i.message }}</div>
@@ -92,7 +92,8 @@ const comment = ref('')
 
 const ruleName = {
   R1: '重复收费', R2: '超频次限制', R3: '缺少家属签字',
-  R4: '医保资格存疑', R5: '冷链断链风险', R6: '医保目录变化(按快照结算)', R7: '缺少现场照片'
+  R4: '医保资格存疑', R5: '冷链断链风险', R6: '医保目录变化(按快照结算)', R7: '缺少现场照片',
+  R8: '缺货替代材料(确认链+医保差异)'
 }
 
 async function load() {

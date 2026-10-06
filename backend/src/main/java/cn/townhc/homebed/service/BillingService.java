@@ -142,7 +142,14 @@ public class BillingService {
                         + (Boolean.TRUE.equals(m.getColdChain()) && tx.getColdChainTemp() != null
                         ? "；冷链交接 " + tx.getColdChainTemp() + "℃"
                         : Boolean.TRUE.equals(m.getColdChain()) ? "；⚠未登记冷链温度" : "")
-                        + (tx.getBatchNo() != null ? "；批号 " + tx.getBatchNo() : ""));
+                        + (tx.getBatchNo() != null ? "；批号 " + tx.getBatchNo() : "")
+                        + (tx.getSubstitute() != null
+                        ? "；【缺货替代】" + tx.getSubstitute().getSubstituteNo()
+                        + " 原品:" + tx.getSubstitute().getOriginalMaterial().getName()
+                        + "，经医生确认/家属" + tx.getSubstitute().getFamilySignName() + "签字同意"
+                        + "，医保报销差异 " + tx.getSubstitute().getInsuranceDiff()
+                        + "、自费差异 " + tx.getSubstitute().getSelfPayDiff()
+                        : ""));
                 applySplit(item, app);
                 billItemRepository.save(item);
                 billedKeys.add(key);

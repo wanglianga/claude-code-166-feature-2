@@ -54,6 +54,11 @@
               {{ row.itemName }}
               <el-tag size="small" effect="plain">{{ label('CatalogCategory',row.category) }}</el-tag>
               <el-tag size="small" :type="row.reimbursable?'success':'info'">{{ row.insuranceCategory || '自费' }}</el-tag>
+              <el-tooltip v-if="row.note" :content="row.note" placement="top">
+                <el-tag v-if="row.note.includes('缺货替代')" size="small" type="warning" class="ml6">缺货替代</el-tag>
+                <el-tag v-else-if="row.note.includes('未登记冷链')" size="small" type="danger" class="ml6">冷链未登记</el-tag>
+              </el-tooltip>
+              <div v-if="row.note" class="row-note">{{ row.note }}</div>
             </template>
           </el-table-column>
           <el-table-column label="来源" width="130">
@@ -233,4 +238,6 @@ async function doGenerate() {
 .head-line { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .ml8 { margin-left: 8px; } .mb12 { margin-bottom: 12px; } .mt-12 { margin-top: 12px; }
 .footer-actions { margin-top: 18px; text-align: right; }
+.ml6 { margin-left: 6px; }
+.row-note { color: #909399; font-size: 12px; line-height: 1.5; margin-top: 2px; }
 </style>

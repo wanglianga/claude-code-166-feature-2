@@ -14,4 +14,11 @@ public final class SecurityUtils {
         }
         return u;
     }
+
+    /** 无登录上下文（如数据初始化内部调用）时返回 null，不抛异常 */
+    public static LoginUser currentOrNull() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof LoginUser u) return u;
+        return null;
+    }
 }

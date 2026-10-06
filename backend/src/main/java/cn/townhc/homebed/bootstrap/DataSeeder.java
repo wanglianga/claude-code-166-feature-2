@@ -5,6 +5,7 @@ import cn.townhc.homebed.domain.enums.DomainEnums.*;
 import cn.townhc.homebed.repository.*;
 import cn.townhc.homebed.service.ApplicationService;
 import cn.townhc.homebed.service.BillingService;
+import cn.townhc.homebed.service.SubstitutionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,8 +48,12 @@ public class DataSeeder implements CommandLineRunner {
     private final ChargeCatalogRepository catalogRepository;
     private final MedicalOrderRepository orderRepository;
     private final RiskEventRepository riskRepository;
+    private final MaterialSubstitutionRepository substitutionRepository;
+    private final WoundFollowUpRepository followUpRepository;
+    private final RestockTaskRepository restockRepository;
     private final PasswordEncoder passwordEncoder;
     private final BillingService billingService;
+    private final SubstitutionService substitutionService;
 
     @Value("${app.upload.dir}")
     private String uploadDir;
@@ -118,8 +123,18 @@ public class DataSeeder implements CommandLineRunner {
                 bd("68"), true, "乙类", bd("0.70"), true, "2-8℃冷链保存运输", null);
         ChargeCatalog antibiotic = catalog("DR002", "头孢呋辛酯片", CatalogCategory.DRUG, "盒",
                 bd("26"), true, "甲类", bd("0.90"), false, null, null);
+        // 换药物料：医嘱指定的泡沫敷料（可报）+ 两类替代品（水胶体可报/自粘泡沫自费）
+        ChargeCatalog foamSterile = catalog("HC007", "无菌泡沫敷料", CatalogCategory.CONSUMABLE, "片",
+                bd("22"), true, "乙类", bd("0.60"), false, null, null);
+        ChargeCatalog hydrocolloid = catalog("HC004", "水胶体敷料", CatalogCategory.CONSUMABLE, "片",
+                bd("18"), true, "乙类", bd("0.70"), false, null, null);
+        ChargeCatalog foamSelf = catalog("HC006", "自粘泡沫敷料(高吸收)", CatalogCategory.CONSUMABLE, "片",
+                bd("30"), false, "丙类", bd("0"), false, null, null);
+        ChargeCatalog vaseline = catalog("HC005", "无菌凡士林油纱", CatalogCategory.CONSUMABLE, "块",
+                bd("6"), true, "甲类", bd("0.90"), false, null, null);
         catalogRepository.saveAll(List.of(visitFee, ulcer, dressing, catheter, glucose, bp,
-                inject, dressingKit, catheterKit, gauze, insulin, antibiotic));
+                inject, dressingKit, catheterKit, gauze, insulin, antibiotic,
+                foamSterile, hydrocolloid, foamSelf, vaseline));
 
         // ===== 耗材库存 =====
         Material mDressingKit = material("HC001", "一次性换药包", "无菌独立包装", "个",
@@ -132,7 +147,17 @@ public class DataSeeder implements CommandLineRunner {
                 CatalogCategory.COLDCHAIN_DRUG, 9, 6, bd("52"), insulin, true);
         Material mAntibiotic = material("DR002", "头孢呋辛酯片", "0.25g*12片", "盒",
                 CatalogCategory.DRUG, 14, 5, bd("18"), antibiotic, false);
-        materialRepository.saveAll(List.of(mDressingKit, mCatheterKit, mGauze, mInsulin, mAntibiotic));
+        // 换药特定敷料：医嘱指定泡沫敷料缺货；水胶体（可报）、自粘泡沫（自费）、凡士林油纱（甲类可报）有货
+        Material mFoamSterile = material("HC007", "无菌泡沫敷料", "10cm*10cm 5mm厚", "片",
+                CatalogCategory.CONSUMABLE, 0, 6, bd("15"), foamSterile, false);
+        Material mHydrocolloid = material("HC004", "水胶体敷料", "10cm*10cm 薄型", "片",
+                CatalogCategory.CONSUMABLE, 12, 6, bd("11"), hydrocolloid, false);
+        Material mFoamSelf = material("HC006", "自粘泡沫敷料(高吸收)", "12.5cm*12.5cm", "片",
+                CatalogCategory.CONSUMABLE, 8, 4, bd("22"), foamSelf, false);
+        Material mVaseline = material("HC005", "无菌凡士林油纱", "10cm*10cm", "块",
+                CatalogCategory.CONSUMABLE, 30, 10, bd("3.5"), vaseline, false);
+        materialRepository.saveAll(List.of(mDressingKit, mCatheterKit, mGauze, mInsulin, mAntibiotic,
+                mFoamSterile, mHydrocolloid, mFoamSelf, mVaseline));
 
         // ===== 申请单 =====
         BedApplication a1 = submittedApp(p1, family,
@@ -350,6 +375,116 @@ public class DataSeeder implements CommandLineRunner {
         shortAge.setDescription("一次性导尿包仅剩 6 套且多个患者共用，本批次尚未配送");
         shortAge.setStatus(ExceptionStatus.REPORTED);
         exceptionRepository.save(shortAge);
+
+        // ===== 耗材缺货替代确认（患者2）：11 天前已执行替代 + 后续伤口随访追踪 =====
+        // 历史上门（医嘱指定的无菌泡沫敷料缺货，仅有自费的自粘泡沫敷料可替代，医保差异冲突明显）
+        LocalDateTime subDay = LocalDateTime.now().minusDays(11).withHour(9).withMinute(0).withSecond(0).withNano(0);
+        String signSub = placeholderImage("sign", "家属签字 刘桂兰(替代知情同意)", new Color(255, 240, 220));
+        String photoSubWound = placeholderImage("dressing", "替代当日 自粘泡沫敷料覆盖切口", new Color(230, 255, 235));
+        Visit vSub = completedVisit(plan2, p2, nurse1, subDay, 130, 80, 76, 36.5, 188, 98,
+                null, "右膝手术切口换药，原医嘱无菌泡沫敷料缺货，经医生确认家属签字后改用 12.5cm 自粘泡沫敷料(高吸收)",
+                null, "核对胰岛素注射", "切口对合可，无明显渗液", "刘桂兰", signSub, new String[]{signSub, photoSubWound});
+        addCareResults(vSub, visitFee, bp, dressing);
+        consume(vSub, mDressingKit, 1, null, null, nurse1, "换药包");
+
+        // 通过真实服务走“发起→医生确认→家属签字执行”，保证金额测算、出库留痕与业务一致
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                loginAuth(nurse1));
+        MaterialSubstitution sub = substitutionService.propose(
+                new cn.townhc.homebed.service.SubstitutionService.ProposeCommand(
+                        vSub.getId(), mFoamSterile.getId(), mFoamSelf.getId(), null, 1,
+                        "右膝术后切口换药，医嘱要求使用无菌泡沫敷料 10cm*10cm（5mm 厚）吸收渗液并保护创面",
+                        "卫生院无菌泡沫敷料库存为 0，县配送本周期未到，下一周期尚有 3 天",
+                        null));
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                loginAuth(doctor1));
+        substitutionService.doctorConfirm(sub.getId(), true,
+                "切口无感染、渗液少，自粘泡沫敷料可满足本次覆盖吸收需要；该品为自费材料，须向家属充分告知报销差异并取得签字，后续伤口照片要持续追踪");
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                loginAuth(nurse1));
+        sub = substitutionService.familyDecide(sub.getId(), true, "刘桂兰", signSub,
+                "已知晓自粘泡沫敷料为丙类自费(本次多承担约21.20元)，同意本次使用并要求继续追踪伤口", null);
+        // 回填到 11 天前（服务按当前时间留痕，演示数据对齐到历史上门）
+        sub.setCreatedAt(subDay.plusMinutes(5));
+        sub.setDoctorConfirmedAt(subDay.plusMinutes(20));
+        sub.setFamilySignedAt(subDay.plusMinutes(45));
+        sub.setExecutedAt(subDay.plusMinutes(45));
+        sub.getOutTransaction().setOccurredAt(subDay.plusMinutes(45));
+        materialTxRepository.save(sub.getOutTransaction());
+        substitutionRepository.save(sub);
+        // 替代当日伤口照片
+        VisitPhoto phSub = new VisitPhoto();
+        phSub.setVisit(vSub);
+        phSub.setFilePath(photoSubWound);
+        phSub.setPhotoType("dressing");
+        phSub.setCaption(photoSubWound);
+        photoRepository.save(phSub);
+
+        // 后续上门持续追踪：第 5 天愈合良好；第 8 天愈合变慢 → 自动风险事件（回挂替代单）
+        String fuPhoto1 = placeholderImage("dressing", "替代后第5天 敷料在位 创周干燥", new Color(232, 250, 236));
+        String fuPhoto2 = placeholderImage("dressing", "替代后第8天 创面缩小不明显 少量渗液", new Color(255, 244, 224));
+        WoundFollowUp fu1 = substitutionService.recordFollowUp(
+                new cn.townhc.homebed.service.SubstitutionService.FollowUpCommand(
+                        sub.getId(), v1.getId(), List.of(fuPhoto1), WoundOutcome.HEALING_WELL,
+                        4.5, "自粘泡沫敷料在位，创周皮肤无红肿，渗液少，创面较前缩小", null));
+        fu1.setObservedAt(day);
+        followUpRepository.save(fu1);
+        WoundFollowUp fu2 = substitutionService.recordFollowUp(
+                new cn.townhc.homebed.service.SubstitutionService.FollowUpCommand(
+                        sub.getId(), v2.getId(), List.of(fuPhoto2), WoundOutcome.SLOWER,
+                        4.2, "连续 8 天使用自粘泡沫敷料，创面缩小不明显，少量清亮渗液，创周无皮疹",
+                        "建议医生回看替代原因，评估更换更适合少渗液切口的护理材料"));
+        fu2.setObservedAt(day2);
+        followUpRepository.save(fu2);
+        final Long subId = sub.getId();
+        RiskEvent slowRisk = riskRepository.findAll().stream()
+                .filter(r -> r.getSubstitution() != null && r.getSubstitution().getId().equals(subId))
+                .findFirst().orElse(null);
+        if (slowRisk != null) {
+            slowRisk.setReportedAt(day2.plusMinutes(20));
+            riskRepository.save(slowRisk);
+        }
+        // 医生回看替代原因后调整后续护理材料（同步生成护理方案调整医嘱）
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                loginAuth(doctor1));
+        substitutionService.doctorAdjustMaterial(sub.getId(),
+                "停用自粘泡沫敷料，原无菌泡沫敷料到货前改用凡士林油纱+无菌纱布覆盖，隔日换药，每日观察渗液并记录创面面积，泡沫敷料到货后优先恢复");
+        sub.setMaterialAdjustedAt(LocalDateTime.now().minusDays(2));
+        substitutionRepository.save(sub);
+
+        // 今日“上门中”任务：医嘱泡沫敷料仍缺货，供护士现场发起替代确认（家属同意/拒绝两条路径可演示）
+        Visit vPending = scheduledVisit(plan2, p2, nurse1,
+                LocalDateTime.now().minusHours(1).withMinute(0).withSecond(0).withNano(0),
+                "右膝伤口常规换药，医嘱指定无菌泡沫敷料（当前库存 0）：可在“耗材替代确认”中发起替代，经医生确认、家属签字后执行");
+        vPending.setStatus(VisitStatus.IN_PROGRESS);
+        vPending.setStartedAt(LocalDateTime.now().minusMinutes(20));
+        visitRepository.save(vPending);
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+
+        // 补货任务：泡沫敷料待补货（现场家属若拒绝替代会合并到此单）；导尿包已报采购
+        RestockTask rtFoam = new RestockTask();
+        rtFoam.setTaskNo("BH20261004001");
+        rtFoam.setMaterial(mFoamSterile);
+        rtFoam.setRequiredQty(20);
+        rtFoam.setCurrentStockSnapshot(0);
+        rtFoam.setUrgent(true);
+        rtFoam.setStatus(RestockStatus.PENDING);
+        rtFoam.setSourceNote("耗材缺货预警：无菌泡沫敷料库存 0，多名术后换药患者在途使用");
+        rtFoam.setReporter(nurse1);
+        restockRepository.save(rtFoam);
+
+        RestockTask rtCatheter = new RestockTask();
+        rtCatheter.setTaskNo("BH20261004002");
+        rtCatheter.setMaterial(mCatheterKit);
+        rtCatheter.setRequiredQty(15);
+        rtCatheter.setCurrentStockSnapshot(6);
+        rtCatheter.setUrgent(false);
+        rtCatheter.setStatus(RestockStatus.ORDERED);
+        rtCatheter.setOrderedAt(LocalDateTime.now().minusDays(1));
+        rtCatheter.setSourceNote("低于安全库存 8 套，常规补货");
+        rtCatheter.setHandler(admin);
+        rtCatheter.setHandleNote("已向县器械采购平台下单，预计 2 日内配送到院");
+        restockRepository.save(rtCatheter);
 
         // ===== 患者3（远距离高风险）计划与任务 =====
         VisitPlan plan3 = new VisitPlan();
@@ -615,6 +750,15 @@ public class DataSeeder implements CommandLineRunner {
 
     private BigDecimal bd(String s) {
         return new BigDecimal(s);
+    }
+
+    /** 构造指定用户的登录上下文（供内部调用需要当前登录人的领域服务） */
+    private org.springframework.security.core.Authentication loginAuth(SysUser u) {
+        return new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                new cn.townhc.homebed.security.LoginUser(
+                        u.getId(), u.getUsername(), u.getName(), u.getRole()),
+                null, java.util.List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority(
+                "ROLE_" + u.getRole().name())));
     }
 
     /** 用 AWT 生成占位证据图（签字/现场），避免演示数据出现裂图 */

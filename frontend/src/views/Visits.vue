@@ -24,12 +24,13 @@
           <template #default="{row}"><el-tag size="small" :type="tagType('VisitStatus',row.status)">{{ label('VisitStatus',row.status) }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="arrangementNote" label="安排说明" show-overflow-tooltip />
-        <el-table-column label="操作" width="260" fixed="right">
+        <el-table-column label="操作" width="320" fixed="right">
           <template #default="{row}">
             <el-button link type="info" size="small" @click="viewDetail(row)">记录</el-button>
             <el-button v-if="canExecute(row) && row.status==='SCHEDULED'" link type="primary" size="small" @click="start(row)">签到上门</el-button>
             <el-button v-if="canExecute(row) && (row.status==='IN_PROGRESS')" link type="success" size="small" @click="openComplete(row)">填写记录</el-button>
             <el-button v-if="canExecute(row) && row.status!=='COMPLETED'" link type="warning" size="small" @click="openException(row)">报异常</el-button>
+            <el-button v-if="canExecute(row) && (row.status==='IN_PROGRESS'||row.status==='SCHEDULED')" link type="primary" size="small" @click="goSubstitute(row)">缺货替代</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -65,7 +66,9 @@
         <div class="section-title mt-16">耗材/冷链领用</div>
         <el-table :data="detailData.materialTransactions" size="small">
           <el-table-column label="耗材"><template #default="{row}">{{ row.material.name }}
-            <el-tag v-if="row.material.coldChain" size="small" type="primary" effect="plain">冷链</el-tag></template></el-table-column>
+            <el-tag v-if="row.material.coldChain" size="small" type="primary" effect="plain">冷链</el-tag>
+            <el-tag v-if="row.note && row.note.includes('替代出库')" size="small" type="warning" effect="plain">替代</el-tag>
+          </template></el-table-column>
           <el-table-column prop="quantity" label="数量" width="60" align="center" />
           <el-table-column label="交接温度" width="100">
             <template #default="{row}">
@@ -75,6 +78,23 @@
               </span>
               <span v-else>-</span>
             </template>
+          </el-table-column>
+          <el-table-column prop="note" label="备注" show-overflow-tooltip />
+        </el-table>
+
+        <div v-if="detailData.substitutions?.length" class="section-title mt-16">
+          耗材缺货替代确认（{{ detailData.substitutions.length }}）
+          <el-button link type="primary" size="small" @click="goSubstitutionDetail(detailData.substitutions[0])">查看替代确认单</el-button>
+        </div>
+        <el-table v-if="detailData.substitutions?.length" :data="detailData.substitutions" size="small">
+          <el-table-column label="原品→替代品">
+            <template #default="{row}">{{ row.originalMaterial.name }} → {{ row.substituteMaterial.name }}</template>
+          </el-table-column>
+          <el-table-column label="自费差异" width="90" align="right">
+            <template #default="{row}"><span :class="row.selfPayDiff>0?'danger-text':''">{{ row.selfPayDiff>=0?'+':'' }}{{ row.selfPayDiff }}</span></template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{row}"><el-tag size="small" :type="tagType('SubstituteStatus',row.status)">{{ label('SubstituteStatus',row.status) }}</el-tag></template>
           </el-table-column>
         </el-table>
 
@@ -193,6 +213,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import { useAuthStore } from '../store/auth'
@@ -200,6 +221,7 @@ import { ENUMS, label, tagType } from '../labels'
 import SignPad from '../components/SignPad.vue'
 import UploadPhotos from '../components/UploadPhotos.vue'
 
+const router = useRouter()
 const auth = useAuthStore()
 const visits = ref([])
 const loading = ref(true)
@@ -215,6 +237,13 @@ onMounted(load)
 
 function canExecute(row) {
   return auth.isAdmin || (auth.isNurse && row.nurse?.id === auth.user.id)
+}
+
+function goSubstitute(row) {
+  router.push({ path: '/substitutions', query: { visitId: row.id } })
+}
+function goSubstitutionDetail() {
+  router.push('/substitutions')
 }
 
 async function start(row) {
@@ -315,4 +344,5 @@ async function submitOrder() {
 .photo-thumb { width: 120px; height: 80px; border-radius: 6px; margin: 4px 8px 4px 0; border: 1px solid #ddd; }
 .sign-box { text-align: center; }
 .sign-img { width: 260px; height: 100px; border: 1px solid #eee; border-radius: 6px; background: #fafafa; }
+.danger-text { color: #f56c6c; font-weight: 700; }
 </style>

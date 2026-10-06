@@ -19,7 +19,10 @@ const L = {
   ComplianceStatus: { PENDING: '待审查', COMPLIANT: '合规', VIOLATION: '存疑/违规' },
   RiskSeverity: { LOW: '一般', MEDIUM: '较重', HIGH: '严重' },
   RiskEventStatus: { OPEN: '待处理', CONFIRMED: '已确认', CLOSED: '已闭环' },
-  MaterialTxType: { OUT: '领用消耗', IN: '入库', ADJUST: '盘点调整' }
+  MaterialTxType: { OUT: '领用消耗', IN: '入库', ADJUST: '盘点调整' },
+  SubstituteStatus: { PROPOSED: '待医生确认', DOCTOR_CONFIRMED: '医生已确认', EXECUTED: '家属同意已执行', REJECTED_BY_FAMILY: '家属不同意', CANCELLED: '已取消' },
+  RestockStatus: { PENDING: '待补货', ORDERED: '已报采购', ARRIVED: '已到货', CANCELLED: '已取消' },
+  WoundOutcome: { HEALING_WELL: '愈合良好', SLOWER: '愈合变慢', ALLERGY: '过敏/接触性皮炎', INFECTION: '感染征象', OTHER: '其他异常' }
 }
 
 export function label(group, value) {
@@ -37,7 +40,10 @@ export function tagType(group, value) {
     BillStatus: { DRAFT: 'warning', CONFIRMED: 'primary', INSURANCE_REVIEWED: 'success', DISPUTED: 'danger', SETTLED: 'success' },
     ComplianceStatus: { PENDING: 'info', COMPLIANT: 'success', VIOLATION: 'danger' },
     RiskSeverity: { LOW: 'success', MEDIUM: 'warning', HIGH: 'danger' },
-    RiskEventStatus: { OPEN: 'danger', CONFIRMED: 'warning', CLOSED: 'success' }
+    RiskEventStatus: { OPEN: 'danger', CONFIRMED: 'warning', CLOSED: 'success' },
+    SubstituteStatus: { PROPOSED: 'warning', DOCTOR_CONFIRMED: 'primary', EXECUTED: 'success', REJECTED_BY_FAMILY: 'danger', CANCELLED: 'info' },
+    RestockStatus: { PENDING: 'danger', ORDERED: 'warning', ARRIVED: 'success', CANCELLED: 'info' },
+    WoundOutcome: { HEALING_WELL: 'success', SLOWER: 'warning', ALLERGY: 'danger', INFECTION: 'danger', OTHER: 'info' }
   }
   return map[group]?.[value] || 'info'
 }

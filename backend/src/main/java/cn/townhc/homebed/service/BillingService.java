@@ -29,6 +29,7 @@ public class BillingService {
     private final VisitRepository visitRepository;
     private final VisitCareResultRepository careResultRepository;
     private final MaterialTransactionRepository materialTxRepository;
+    private final MaterialSubstitutionRepository substitutionRepository;
     private final ChargeCatalogRepository catalogRepository;
     private final BedApplicationRepository applicationRepository;
     private final SysUserRepository userRepository;
@@ -143,6 +144,14 @@ public class BillingService {
                         ? "；冷链交接 " + tx.getColdChainTemp() + "℃"
                         : Boolean.TRUE.equals(m.getColdChain()) ? "；⚠未登记冷链温度" : "")
                         + (tx.getBatchNo() != null ? "；批号 " + tx.getBatchNo() : ""));
+                // 缺货替代出库：账单行明示替代来源、原品与家属知情签字，便于医保核查
+                substitutionRepository.findByOutTransactionId(tx.getId()).ifPresent(s -> {
+                    item.setItemName("【替代】" + m.getName() + (m.getSpec() != null ? "(" + m.getSpec() + ")" : ""));
+                    item.setNote(item.getNote() + "；缺货替代单 " + s.getSubstitutionNo()
+                            + "：医嘱原品[" + s.getOriginalMaterial().getName()
+                            + "]缺货，医生确认、家属签字后改用本品；医保报销差异 "
+                            + s.getInsuranceDiff() + "，自费差异 " + s.getSelfPayDiff());
+                });
                 applySplit(item, app);
                 billItemRepository.save(item);
                 billedKeys.add(key);

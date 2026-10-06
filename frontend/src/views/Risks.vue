@@ -25,6 +25,7 @@
           <template #default="{row}">
             <el-button v-if="row.status==='OPEN' && canHandle" link type="primary" size="small" @click="open(row,'confirm')">确认处置</el-button>
             <el-button v-if="row.status==='CONFIRMED' && canHandle" link type="success" size="small" @click="open(row,'close')">闭环</el-button>
+            <el-button v-if="row.substitution" link type="warning" size="small" @click="reviewSubstitution(row)">回看替代原因</el-button>
             <el-button link type="info" size="small" @click="view(row)">详情</el-button>
           </template>
         </el-table-column>
@@ -49,11 +50,13 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import { useAuthStore } from '../store/auth'
 import { label, tagType } from '../labels'
 
+const router = useRouter()
 const auth = useAuthStore()
 const risks = ref([])
 const loading = ref(true)
@@ -75,6 +78,9 @@ onMounted(load)
 
 function open(row, m) { current.value = row; mode.value = m; handlePlan.value = row.handlePlan || ''; closeNote.value = ''; visible.value = true }
 function view(row) { current.value = row; mode.value = 'close'; visible.value = true }
+function reviewSubstitution(row) {
+  router.push({ path: '/substitutions', query: { substitutionId: row.substitution.id } })
+}
 async function submit() {
   if (mode.value === 'confirm') {
     if (!handlePlan.value) return ElMessage.warning('请填写处置方案')

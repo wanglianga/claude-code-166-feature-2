@@ -21,6 +21,7 @@ const routes = [
         meta: { roles: ['FAMILY_DOCTOR', 'ADMIN', 'NURSE'] } },
       { path: 'materials', name: '耗材冷链', component: () => import('../views/Materials.vue'),
         meta: { roles: ['ADMIN', 'FINANCE', 'NURSE'] } },
+      { path: 'substitutions', name: '耗材替代确认', component: () => import('../views/Substitutions.vue') },
       { path: 'bills', name: '统一账单', component: () => import('../views/Bills.vue') },
       { path: 'catalogs', name: '收费医保目录', component: () => import('../views/Catalogs.vue'),
         meta: { roles: ['FINANCE', 'ADMIN'] } },

@@ -61,6 +61,12 @@
                   ｜ 血糖 {{ node.visit.bloodGlucose||'-' }} ｜ 血氧 {{ node.visit.oxygenSaturation||'-' }}%</div>
                 <div>护理 {{ node.careResults.length }} 项 ｜ 耗材 {{ node.materialTransactions.length }} 项
                   ｜ 照片 {{ node.photos.length }} 张 ｜ 异常 {{ node.exceptions.length }} ｜ 医嘱 {{ node.orders.length }}</div>
+                <div v-if="node.substitutions?.length" class="mt-12">
+                  <el-tag v-for="s in node.substitutions" :key="s.id" size="small" class="mb8"
+                          :type="tagType('SubstituteStatus',s.status)">
+                    缺货替代：{{ s.originalMaterial.name }}→{{ s.substituteMaterial.name }}（{{ label('SubstituteStatus',s.status) }}）
+                  </el-tag>
+                </div>
                 <div v-if="node.visit.familySignPath" class="sign-line">
                   <el-image :src="node.visit.familySignPath" class="sign-thumb" fit="contain" />
                   家属签字：{{ node.visit.familySignName }}
@@ -110,7 +116,9 @@ function stageType(stage) {
     '申请': 'primary', '评估': 'warning', '排班': 'primary', '上门': 'primary',
     '巡诊记录': '', '家属签字': 'success', '医嘱': 'warning', '远程复核': 'warning',
     '异常': 'danger', '账单': 'info', '家属确认': 'success', '收费质疑': 'danger',
-    '结算': 'success', '风险': 'danger'
+    '结算': 'success', '风险': 'danger',
+    '耗材替代': 'warning', '医生确认': 'primary', '家属拒绝替代': 'danger',
+    '替代效果随访': 'success', '调整护理材料': 'warning'
   }[stage] || ''
 }
 

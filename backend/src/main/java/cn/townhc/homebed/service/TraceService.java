@@ -2,6 +2,7 @@ package cn.townhc.homebed.service;
 
 import cn.townhc.homebed.common.BusinessException;
 import cn.townhc.homebed.domain.entity.*;
+import cn.townhc.homebed.domain.enums.DomainEnums.*;
 import cn.townhc.homebed.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,8 @@ public class TraceService {
     private final VisitPhotoRepository photoRepository;
     private final VisitExceptionRepository exceptionRepository;
     private final MaterialTransactionRepository materialTxRepository;
+    private final MaterialSubstitutionRepository substitutionRepository;
+    private final WoundFollowUpRepository followUpRepository;
     private final MedicalOrderRepository orderRepository;
     private final BillRepository billRepository;
     private final BillItemRepository billItemRepository;
@@ -57,10 +60,27 @@ public class TraceService {
                 node.put("exceptions", exceptionRepository.findByVisitId(v.getId()));
                 node.put("materialTransactions", materialTxRepository.findByVisitId(v.getId()));
                 node.put("orders", orderRepository.findByVisitId(v.getId()));
+                node.put("substitutions", substitutionRepository.findByVisitId(v.getId()));
                 visitChain.add(node);
             }
         }
         root.put("visitChain", visitChain);
+        List<MaterialSubstitution> rootSubs = substitutionRepository.findByPatientIdOrderByCreatedAtDesc(patientId);
+        rootSubs.forEach(s -> {
+            s.getOriginalMaterial().getName();
+            s.getSubstituteMaterial().getName();
+            s.getVisit().getVisitNo();
+            if (s.getRestockTask() != null) s.getRestockTask().getTaskNo();
+            if (s.getAdjustOrder() != null) s.getAdjustOrder().getOrderNo();
+        });
+        root.put("substitutions", rootSubs);
+        List<WoundFollowUp> rootFus = followUpRepository.findByPatientIdOrderByObservedAtDesc(patientId);
+        rootFus.forEach(f -> {
+            f.getSubstitution().getSubstitutionNo();
+            if (f.getVisit() != null) f.getVisit().getVisitNo();
+            if (f.getRecorder() != null) f.getRecorder().getName();
+        });
+        root.put("woundFollowUps", rootFus);
 
         List<Map<String, Object>> bills = new ArrayList<>();
         for (Bill b : billRepository.findByApplicationId(applicationId)) {
@@ -139,6 +159,55 @@ public class TraceService {
                 if (o.getReviewedAt() != null) {
                     add(timeline, o.getReviewedAt(), "远程复核", "医生·" + safeName(o.getReviewer()),
                             o.getOrderNo() + " 远程复核" + o.getStatus().label, o.getReviewComment(), null);
+                }
+            }
+            @SuppressWarnings("unchecked")
+            List<MaterialSubstitution> subs = (List<MaterialSubstitution>) node.get("substitutions");
+            for (MaterialSubstitution s : subs) {
+                add(timeline, s.getCreatedAt(), "耗材替代", "护士·" + safeName(s.getProposer()),
+                        s.getSubstitutionNo() + " 发起缺货替代：原品[" + s.getOriginalMaterial().getName()
+                                + "]→替代品[" + s.getSubstituteMaterial().getName() + "]",
+                        "原医嘱：" + nz(s.getOriginalOrderSnapshot())
+                                + "；缺货原因：" + nz(s.getShortageReason())
+                                + "；医保报销差异 " + s.getInsuranceDiff()
+                                + "，自费差异 " + s.getSelfPayDiff()
+                                + "；可能影响：" + nz(s.getPossibleImpact()),
+                        List.of());
+                if (s.getDoctorConfirmedAt() != null) {
+                    add(timeline, s.getDoctorConfirmedAt(), "医生确认", "医生·" + safeName(s.getDoctor()),
+                            s.getSubstitutionNo() + " 医生确认替代方案",
+                            "确认意见：" + nz(s.getDoctorComment()), List.of());
+                }
+                if (s.getStatus() == SubstituteStatus.EXECUTED && s.getFamilySignedAt() != null) {
+                    add(timeline, s.getFamilySignedAt(), "家属签字", s.getFamilySignName(),
+                            s.getSubstitutionNo() + " 家属知情同意替代并执行",
+                            "替代品 " + s.getSubstituteMaterial().getName() + " x" + s.getQuantity()
+                                    + "；家属意见：" + nz(s.getFamilyComment()),
+                            s.getFamilySignPath() == null ? List.of() : List.of(s.getFamilySignPath()));
+                }
+                if (s.getStatus() == SubstituteStatus.REJECTED_BY_FAMILY && s.getFamilySignedAt() != null) {
+                    add(timeline, s.getFamilySignedAt(), "家属拒绝替代", "家属",
+                            s.getSubstitutionNo() + " 家属不同意使用替代品",
+                            "本次护理调整：" + nz(s.getPlanAdjustment())
+                                    + (s.getRestockTask() != null
+                                    ? "；加急补货任务 " + s.getRestockTask().getTaskNo() : ""),
+                            List.of());
+                }
+                for (WoundFollowUp f : followUpRepository.findBySubstitutionIdOrderByObservedAtAsc(s.getId())) {
+                    add(timeline, f.getObservedAt(), "替代效果随访",
+                            "护士·" + safeName(f.getRecorder()),
+                            s.getSubstitutionNo() + " 伤口随访：" + f.getOutcome().label,
+                            nz(f.getObservation()) + "；" + nz(f.getNurseNote()),
+                            f.getPhotoPaths() == null || f.getPhotoPaths().isBlank() ? List.of()
+                                    : List.of(f.getPhotoPaths().split(",")));
+                }
+                if (s.getMaterialAdjustedAt() != null) {
+                    add(timeline, s.getMaterialAdjustedAt(), "调整护理材料",
+                            "医生·" + safeName(s.getDoctor()),
+                            s.getSubstitutionNo() + " 医生回看替代原因后调整后续护理材料",
+                            nz(s.getMaterialAdjustNote())
+                                    + (s.getAdjustOrder() != null
+                                    ? "；调整医嘱 " + s.getAdjustOrder().getOrderNo() : ""), List.of());
                 }
             }
             @SuppressWarnings("unchecked")

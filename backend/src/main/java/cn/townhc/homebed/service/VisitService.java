@@ -24,6 +24,7 @@ public class VisitService {
     private final RiskEventRepository riskEventRepository;
     private final MaterialRepository materialRepository;
     private final MaterialTransactionRepository materialTransactionRepository;
+    private final MaterialSubstitutionRepository substitutionRepository;
     private final ChargeCatalogRepository catalogRepository;
     private final SysUserRepository userRepository;
     private final AuditService auditService;
@@ -71,6 +72,7 @@ public class VisitService {
         map.put("photos", photoRepository.findByVisitId(id));
         map.put("exceptions", exceptionRepository.findByVisitId(id));
         map.put("materialTransactions", materialTransactionRepository.findByVisitId(id));
+        map.put("substitutions", substitutionRepository.findByVisitId(id));
         return map;
     }
 

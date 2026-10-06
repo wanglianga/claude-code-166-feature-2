@@ -27,6 +27,7 @@ import java.util.*;
  *  R5 冷链断链风险：冷链药品未登记交接温度
  *  R6 医保目录变化：出账后目录版本（比例/价格/可报状态）调整，按出账快照还原
  *  R7 缺少现场照片证据：收费护理项目对应巡诊无任何照片
+ *  R8 缺货替代材料：须有医生确认与家属知情签字，医保报销差异已告知；自费增加行重点复核
  */
 @Slf4j
 @Service
@@ -39,6 +40,7 @@ public class ComplianceService {
     private final ChargeCatalogRepository catalogRepository;
     private final VisitRepository visitRepository;
     private final VisitPhotoRepository photoRepository;
+    private final MaterialSubstitutionRepository substitutionRepository;
     private final SysUserRepository userRepository;
     private final AuditService auditService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -142,6 +144,36 @@ public class ComplianceService {
                                     + it.getServiceDate() + " 单价 " + it.getUnitPrice()
                                     + "、比例 " + it.getReimbursementRate(),
                             List.of(it.getSourceNo() == null ? bill.getBillNo() : it.getSourceNo())));
+                }
+            }
+        }
+
+        // R8 缺货替代材料：核查家属知情签字与医保报销差异告知
+        for (BillItem it : items) {
+            if (it.getSourceType() != BillSourceType.MATERIAL || it.getNote() == null
+                    || !it.getNote().contains("缺货替代单")) continue;
+            Visit visit = it.getSourceNo() == null ? null : visitByNo.get(it.getSourceNo());
+            if (visit == null) continue;
+            List<MaterialSubstitution> subs = substitutionRepository.findByVisitId(visit.getId()).stream()
+                    .filter(s -> s.getStatus() == SubstituteStatus.EXECUTED)
+                    .filter(s -> s.getOutTransaction() != null
+                            && it.getSourceId() != null
+                            && it.getSourceId().equals(s.getOutTransaction().getId()))
+                    .toList();
+            for (MaterialSubstitution s : subs) {
+                if (s.getFamilySignPath() == null || s.getFamilySignPath().isBlank()) {
+                    issues.add(new Issue("R8", "VIOLATION",
+                            "替代材料[" + it.getItemName() + "]对应替代单 " + s.getSubstitutionNo()
+                                    + " 缺少家属知情签字，医保报销差异未经家属确认，不予报销",
+                            List.of(visit.getVisitNo())));
+                } else if (s.getSelfPayDiff() != null && s.getSelfPayDiff().signum() > 0) {
+                    issues.add(new Issue("R8", "WARNING",
+                            "替代材料[" + it.getItemName() + "]与医嘱原品[" + s.getOriginalMaterial().getName()
+                                    + "]医保报销存在差异（报销额变化 " + s.getInsuranceDiff()
+                                    + "、家属自费增加 " + s.getSelfPayDiff() + "），替代单 "
+                                    + s.getSubstitutionNo() + " 已有医生确认与家属签字("
+                                    + s.getFamilySignName() + ")，准予按替代材料目录报销",
+                            List.of(visit.getVisitNo())));
                 }
             }
         }

@@ -24,6 +24,11 @@ public class RiskEvent extends BaseEntity {
     @JoinColumn(name = "visit_id")
     private Visit visit;
 
+    /** 若风险由替代耗材效果引起（愈合变慢/过敏），关联替代确认单，供医生回看替代原因 */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "substitution_id")
+    private MaterialSubstitution substitution;
+
     /** 风险类型：病情恶化/生命体征异常/压疮加重/导尿感染风险/冷链异常/照护缺失/其他 */
     @Column(nullable = false, length = 32)
     private String riskType;
